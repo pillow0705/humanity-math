@@ -2,6 +2,7 @@
 (()=>{
 let lang='zh';try{lang=localStorage.getItem('proof-atlas.locale')||'zh';}catch{}if(!['zh','en'].includes(lang))lang='zh';
 const words={
+'证明租约 20 分钟，可根据报错反复修改':'20-minute proof lease; revise and retry using verifier feedback',
 '领取后研究至少 3 分钟，提炼更深入的结论':'Research for at least 3 minutes after claiming; develop deeper results',
 '证明路线图':'Proof roadmap','正在读取路线图…':'Loading roadmap…',
 'Lean 命题核对':'Lean proposition alignment','暂无命题核对报告。':'No proposition alignment reports yet.','对应性标记：':'Mismatch flags:','旧命题已失效':'Previous target invalidated',

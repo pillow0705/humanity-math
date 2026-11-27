@@ -85,7 +85,7 @@ def target_registration_package(tx,t):
     schema['properties']['targets'].update(minItems=len(items),maxItems=len(items))
     refs=sorted({ref for item in items for ref in item.get('references',[])})
     reference_targets=[dict(insight_id=ident,lean_target=get_target(tx,ident),detail_url=PREFIX+'/api/v1/insights/'+ident) for ident in refs]
-    return dict(collaboration_language='en',problem=describe_problem(need(tx,'problems',t['problem_id'])),goal=t['goal'],target_ids=t['target_ids'],materials=[dict(item,lean_target=get_target(tx,item['id'])) for item in items],reference_targets=reference_targets,lean_environment=environment(PREFIX),prompt=prompt_for(t),submission=dict(method='POST',url=PREFIX+'/api/v1/lean-targets/batch',schema=schema,include_fields=['contributor_id','contributor_name','contributor_password','task_id','claim_token']),mode='register',maintenance=dict(batch_size=len(items),batch_points=8,proofs_required=False,note='Register complete propositions, not proofs. Target-definition imports do not prove their statements. Root dependencies are prioritized.'))
+    return dict(collaboration_language='en',problem=describe_problem(need(tx,'problems',t['problem_id'])),goal=t['goal'],target_ids=t['target_ids'],materials=[dict(item,lean_target=get_target(tx,item['id']),previous_target_audits=[{k:a[k] for k in ('target_hash','alignment','rationale','contributor_name','created_at')} for a in tx.all('target_audits') if a['insight_id']==item['id']]) for item in items],reference_targets=reference_targets,lean_environment=environment(PREFIX),prompt=prompt_for(t),submission=dict(method='POST',url=PREFIX+'/api/v1/lean-targets/batch',schema=schema,include_fields=['contributor_id','contributor_name','contributor_password','task_id','claim_token']),mode='register',maintenance=dict(batch_size=len(items),batch_points=8,proofs_required=False,note='Register complete propositions, not proofs. Target-definition imports do not prove their statements. Root dependencies are prioritized.'))
 
 def research_package(tx,t):
     if not supported_task(t): raise HTTPException(409,'Unsupported task')
@@ -379,7 +379,9 @@ def claim(body:Claim):
                 tx.put('target_mode_dispatch',dict(id=t['problem_id'],last_mode=t.get('mode','register')))
             token=secrets.token_urlsafe(32)
             if t['type'] in ('insight_explore',): t['research_direction']=assign_direction(need(tx,'problems',t['problem_id']))
-            t.update(status='claimed',contributor_id=b['contributor_id'],contributor_name=b['contributor_name'],claim_hash=digest(token),claimed_at=time.time(),expires_at=time.time()+3600,attempts=t['attempts']+1)
+            lease_seconds=1200 if t['type']=='lean_work' and t.get('mode')!='audit' else 3600
+            if t['type']=='lean_work':t['proof_attempts']=[]
+            t.update(status='claimed',lease_seconds=lease_seconds,contributor_id=b['contributor_id'],contributor_name=b['contributor_name'],claim_hash=digest(token),claimed_at=time.time(),expires_at=time.time()+lease_seconds,attempts=t['attempts']+1)
             package=research_package(tx,t); tx.put('tasks',t)
             for target_id in t.get('target_ids',[]) or [t.get('target_id') or t['id']]:
                 note_exposure(tx,'task_claims',target_id)
@@ -398,7 +400,7 @@ def lease_action(id,body,renew):
         if not secrets.compare_digest(t['claim_hash'],digest(body.claim_token)): raise HTTPException(403,'Invalid lease token')
         if renew:
             t.setdefault('claimed_at',t['expires_at']-3600)
-            t['expires_at']=time.time()+3600
+            t['expires_at']=time.time()+t.get('lease_seconds',1200 if t['type']=='lean_work' and t.get('mode')!='audit' else 3600)
         else: t.update(status='available',claim_hash='',expires_at=0)
         tx.put('tasks',t); return public_task(t)
 @app.post('/api/v1/tasks/{id}/renew')
@@ -752,3 +754,15 @@ def target_audits(id:str):
     with store.transaction() as tx:
         need(tx,'insights',id)
         return dict(items=[{k:a[k] for k in ('id','insight_id','target_hash','alignment','rationale','contributor_name','created_at','misaligned_count')} for a in tx.all('target_audits') if a['insight_id']==id])
+
+
+@app.get('/api/v1/tasks/{id}/proof-feedback')
+def proof_feedback(id:str):
+    with store.transaction() as tx:
+        t=need(tx,'tasks',id)
+        if t['type']!='lean_work':raise HTTPException(409,'Not a Lean proof task')
+        attempts=[]
+        for ident in t.get('proof_attempts',[]):
+            a=need(tx,'lean_artifacts',ident);v=need(tx,'verifications',a['verification_id'])
+            attempts.append(dict(artifact_id=ident,verification_id=v['id'],status=v['status'],log=v.get('log',''),exit_code=v.get('exit_code'),verification_url=PREFIX+'/api/v1/lean/verifications/'+v['id']))
+        return dict(task_id=id,status=t['status'],expires_at=t.get('expires_at'),can_retry=t['status']=='claimed' and t.get('expires_at',0)>time.time() and not any(v['status'] in ('queued','running') for v in attempts),attempts=attempts)

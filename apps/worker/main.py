@@ -265,8 +265,15 @@ def once():
                     or result.get('target_hash')!=a.get('target_hash') or result.get('target_matched') is not True):
                 result=dict(status='failed',log='Missing target attestation or fixed Insight target changed during proof verification')
         v.update(result,finished_at=time.time()); tx.put('verifications' if kind=='verification' else 'solutions',v)
+        if kind=='verification' and a.get('task_id'):
+            leased=tx.get('tasks',a['task_id'])
+            if leased and leased['status']=='claimed' and leased.get('contributor_id')==a['contributor_id'] and a['id'] in leased.get('proof_attempts',[]):
+                leased.update(last_verification_id=v['id'],last_verification_status=result['status'])
+                if result['status']=='failed':leased.update(repair_artifact_id=a['id'],mode='repair')
+                if result['status']=='passed':leased.update(status='submitted',result_id=a['id'],submitted_at=time.time())
+                tx.put('tasks',leased)
         if kind=='verification' and a['insight_id'] in priority_targets(tx) and result['status']=='passed': task(tx,a['problem_id'],'lean_work',a['id'],mode='audit')
-        if kind=='verification' and a['insight_id'] in priority_targets(tx) and result['status']=='failed':
+        if kind=='verification' and a['insight_id'] in priority_targets(tx) and result['status']=='failed' and not any(t['type']=='lean_work' and t.get('target_id')==a['insight_id'] and t['status']=='claimed' and t.get('expires_at',0)>time.time() for t in tx.all('tasks')):
             repair=task(tx,a['problem_id'],'lean_work',a['insight_id'],mode='repair')
             repair.update(repair_artifact_id=a['id'],goal='Repair the failed Lean artifact using its diagnostics, and submit a corrected proof for the linked insight.')
             tx.put('tasks',repair)

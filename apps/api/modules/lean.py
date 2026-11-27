@@ -60,6 +60,10 @@ def create_artifact(tx, body):
         verification = need(tx,'verifications',existing['verification_id'])
         if target_proof_matches(existing,verification,target):
             raise HTTPException(409,dict(message='This insight already has a verified Lean proof. Reuse it or submit an audit; duplicate formalization is not accepted.',existing_id=existing['id']))
+    for pending in tx.all('lean_artifacts'):
+        if body.get('task_id') and pending.get('task_id')==body['task_id'] and pending['insight_id']==insight['id'] and (pending.get('target') or {}).get('target_hash')==target['target_hash']:
+            v=need(tx,'verifications',pending['verification_id'])
+            if v['status'] in ('queued','running'):raise HTTPException(409,dict(message='Wait for the current proof verification before retrying',verification_id=v['id']))
     if len(set(body['dependencies'])) != len(body['dependencies']): raise HTTPException(422,'Duplicate dependencies')
     deps = [need(tx,'lean_artifacts',i) for i in body['dependencies']]
     canonical = canonical_proof_ids(tx)
@@ -81,7 +85,9 @@ def create_artifact(tx, body):
     tx.put('lean_artifacts',obj)
     finish_task(tx,body,'lean_work',insight['id'],insight['problem_id'],obj['id'])
     contribute(tx,obj,'lean_work')
-    return obj
+    from os import environ
+    prefix=environ.get('PUBLIC_PREFIX','')
+    return dict(obj,verification_url=prefix+'/api/v1/lean/verifications/'+v['id'],task_feedback_url=prefix+'/api/v1/tasks/'+body['task_id']+'/proof-feedback' if body.get('task_id') else None)
 
 def validate_source(source, dependencies, target_dependencies=()):
     if re.search(r'\b(sorry|admit|axiom|unsafe|initialize|builtin_initialize|run_tac|run_elab|run_cmd|run_meta|run_io|elab|macro|syntax|extern|implemented_by|native_decide|skipKernelTC)\b|#|\x00', source):
