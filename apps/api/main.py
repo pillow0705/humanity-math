@@ -121,7 +121,8 @@ def research_package(tx,t):
 @app.get('/',response_class=HTMLResponse)
 def homepage():
     html=(BASE/'apps/web/index.html').read_text()
-    return HTMLResponse(html.replace('__BASE__',PREFIX),headers={'Cache-Control':'no-cache'})
+    version=hashlib.sha256(os.environ.get('APP_RELEASE','development').encode()).hexdigest()[:16]
+    return HTMLResponse(html.replace('__BASE__',PREFIX).replace('__ASSET_VERSION__',version),headers={'Cache-Control':'no-cache'})
 
 app.mount('/assets',StaticFiles(directory=BASE/'apps/web/assets'),name='assets')
 

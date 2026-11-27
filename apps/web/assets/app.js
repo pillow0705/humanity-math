@@ -378,3 +378,13 @@ async function researchGuidanceDialog(){
  }catch(e){errorMessage(e.message);}
 }
 $('research-guidance-button').onclick=researchGuidanceDialog;
+
+(()=>{
+ const widget=document.getElementById('wechat-contact'),toggle=document.getElementById('wechat-toggle'),panel=document.getElementById('wechat-contact-panel');
+ if(!widget||!toggle||!panel)return;
+ const show=open=>{panel.hidden=!open;toggle.setAttribute('aria-expanded',String(open));};
+ toggle.onclick=()=>show(panel.hidden);
+ document.getElementById('wechat-close').onclick=()=>show(false);
+ document.addEventListener('keydown',event=>{if(event.key==='Escape')show(false);});
+ document.addEventListener('click',event=>{if(!widget.contains(event.target))show(false);});
+})();

@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Math Collab",
-    "description": "File-backed collaborative mathematics. Immutable submissions; no login. Contributors claim public English names and sequential numbers.",
+    "description": "File-backed collaborative mathematics. Immutable submissions; Private eight-digit credentials for new accounts; stable internal attribution IDs.",
     "version": "0.1.0"
   },
   "paths": {
@@ -37,6 +37,89 @@
             }
           },
           "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/contributors/authenticate": {
+      "post": {
+        "summary": "Authenticate Contributor",
+        "operationId": "authenticate_contributor_api_v1_contributors_authenticate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CredentialLogin"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/contributors/{id}/credential": {
+      "post": {
+        "summary": "Change Credential",
+        "operationId": "change_credential_api_v1_contributors__id__credential_post",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CredentialChange"
+              }
+            }
+          }
         },
         "responses": {
           "200": {
@@ -628,6 +711,43 @@
         }
       }
     },
+    "/api/v1/problems/{id}/insight-graph": {
+      "get": {
+        "summary": "Insight Graph",
+        "operationId": "insight_graph_api_v1_problems__id__insight_graph_get",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/problems/{id}/overview": {
       "get": {
         "summary": "Overview",
@@ -722,6 +842,46 @@
                 "schema": {
                   "type": "string"
                 }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/activity": {
+      "get": {
+        "summary": "Activity",
+        "operationId": "activity_api_v1_activity_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "default": 8,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
               }
             }
           },
@@ -1079,127 +1239,6 @@
         }
       }
     },
-    "/api/v1/routes": {
-      "post": {
-        "summary": "Post Route",
-        "operationId": "post_route_api_v1_routes_post",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Route"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "get": {
-        "summary": "Routes",
-        "operationId": "routes_api_v1_routes_get",
-        "parameters": [
-          {
-            "name": "problem_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Problem Id"
-            }
-          },
-          {
-            "name": "q",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "default": "",
-              "title": "Q"
-            }
-          },
-          {
-            "name": "offset",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 0,
-              "default": 0,
-              "title": "Offset"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 100,
-              "minimum": 1,
-              "default": 30,
-              "title": "Limit"
-            }
-          },
-          {
-            "name": "include_withdrawn",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "boolean",
-              "default": false,
-              "title": "Include Withdrawn"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/insights": {
       "post": {
         "summary": "Post Insight",
@@ -1321,43 +1360,6 @@
         }
       }
     },
-    "/api/v1/routes/{id}": {
-      "get": {
-        "summary": "Route",
-        "operationId": "route_api_v1_routes__id__get",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/insights/{id}": {
       "get": {
         "summary": "Insight",
@@ -1395,129 +1397,10 @@
         }
       }
     },
-    "/api/v1/routes/{id}/dependencies": {
-      "get": {
-        "summary": "Route Deps",
-        "operationId": "route_deps_api_v1_routes__id__dependencies_get",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/insights/{id}/dependencies": {
       "get": {
         "summary": "Insight Deps",
         "operationId": "insight_deps_api_v1_insights__id__dependencies_get",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/routes/{id}/reviews": {
-      "post": {
-        "summary": "Route Review",
-        "operationId": "route_review_api_v1_routes__id__reviews_post",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Review"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "get": {
-        "summary": "Route Reviews",
-        "operationId": "route_reviews_api_v1_routes__id__reviews_get",
         "parameters": [
           {
             "name": "id",
@@ -1611,6 +1494,42 @@
             }
           }
         ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/reviews/batch": {
+      "post": {
+        "summary": "Review Batch",
+        "operationId": "review_batch_api_v1_reviews_batch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewBatch"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -2181,9 +2100,156 @@
             "required": false,
             "schema": {
               "type": "string",
-              "pattern": "^(insights|routes)$",
+              "pattern": "^insights$",
               "default": "insights",
               "title": "Kind"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/problems/{id}/dispatch": {
+      "get": {
+        "summary": "Dispatch State",
+        "operationId": "dispatch_state_api_v1_problems__id__dispatch_get",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/research-plans": {
+      "post": {
+        "summary": "Post Research Plan",
+        "operationId": "post_research_plan_api_v1_research_plans_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResearchPlan"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/research-plans/{id}": {
+      "get": {
+        "summary": "Research Plan",
+        "operationId": "research_plan_api_v1_research_plans__id__get",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/problems/{id}/research-guidance": {
+      "get": {
+        "summary": "Research Guidance",
+        "operationId": "research_guidance_api_v1_problems__id__research_guidance_get",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Id"
             }
           }
         ],
@@ -2219,6 +2285,19 @@
             "pattern": "^[1-9][0-9]*$",
             "title": "Contributor Id",
             "description": "Sequential contributor number encoded as a string"
+          },
+          "contributor_password": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{7}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contributor Password",
+            "description": "Private eight-digit credential, required for new accounts; never publish it"
           },
           "contributor_name": {
             "type": "string",
@@ -2309,6 +2388,19 @@
             "title": "Contributor Id",
             "description": "Sequential contributor number encoded as a string"
           },
+          "contributor_password": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{7}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contributor Password",
+            "description": "Private eight-digit credential, required for new accounts; never publish it"
+          },
           "contributor_name": {
             "type": "string",
             "maxLength": 32,
@@ -2397,6 +2489,19 @@
             "title": "Contributor Id",
             "description": "Sequential contributor number encoded as a string"
           },
+          "contributor_password": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{7}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contributor Password",
+            "description": "Private eight-digit credential, required for new accounts; never publish it"
+          },
           "contributor_name": {
             "type": "string",
             "maxLength": 32,
@@ -2431,10 +2536,10 @@
               {
                 "type": "string",
                 "enum": [
-                  "route_design",
                   "insight_explore",
                   "review",
-                  "lean_work"
+                  "lean_work",
+                  "research_synthesis"
                 ]
               },
               {
@@ -2458,6 +2563,19 @@
             "type": "string",
             "pattern": "^[1-9][0-9]*$",
             "title": "Contributor Id"
+          },
+          "contributor_password": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{7}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contributor Password",
+            "description": "Private eight-digit credential, required for new accounts; never publish it"
           },
           "contributor_name": {
             "type": "string",
@@ -2498,6 +2616,82 @@
           "name"
         ],
         "title": "ContributorClaim"
+      },
+      "CredentialChange": {
+        "properties": {
+          "contributor_id": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Contributor Id"
+          },
+          "contributor_password": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{7}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contributor Password",
+            "description": "Private eight-digit credential, required for new accounts; never publish it"
+          },
+          "contributor_name": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 2,
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
+            "title": "Contributor Name"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Reason",
+            "default": ""
+          },
+          "new_password": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{7}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Password"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "contributor_id",
+          "contributor_name"
+        ],
+        "title": "CredentialChange"
+      },
+      "CredentialLogin": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 2,
+            "title": "Name"
+          },
+          "password": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Password"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "password"
+        ],
+        "title": "CredentialLogin"
       },
       "HTTPValidationError": {
         "properties": {
@@ -2556,6 +2750,19 @@
             "title": "Contributor Id",
             "description": "Sequential contributor number encoded as a string"
           },
+          "contributor_password": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{7}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contributor Password",
+            "description": "Private eight-digit credential, required for new accounts; never publish it"
+          },
           "contributor_name": {
             "type": "string",
             "maxLength": 32,
@@ -2596,11 +2803,11 @@
             ],
             "title": "Supersedes Id"
           },
-          "route_id": {
-            "type": "string",
-            "pattern": "^R[A-Za-z0-9_-]{1,99}$",
-            "title": "Route Id",
-            "description": "Required: exactly one most relevant research route belonging to this problem; other citations do not create additional bindings"
+          "is_prerequisite": {
+            "type": "boolean",
+            "title": "Is Prerequisite",
+            "description": "True only for a supporting lemma registered for the current exploration task: no separate insight base points; it does not complete the task",
+            "default": false
           },
           "claims_problem_solved": {
             "type": "integer",
@@ -2673,7 +2880,6 @@
         "required": [
           "contributor_id",
           "contributor_name",
-          "route_id",
           "problem_id",
           "title",
           "claim",
@@ -2702,6 +2908,153 @@
         ],
         "title": "Lease"
       },
+      "ResearchPath": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Title"
+          },
+          "strategy": {
+            "type": "string",
+            "maxLength": 15000,
+            "minLength": 1,
+            "title": "Strategy"
+          },
+          "insight_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 300,
+            "minItems": 1,
+            "title": "Insight Ids"
+          },
+          "proof_gaps": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "minItems": 1,
+            "title": "Proof Gaps"
+          },
+          "difficulties": {
+            "type": "string",
+            "maxLength": 15000,
+            "minLength": 1,
+            "title": "Difficulties"
+          },
+          "next_steps": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 30,
+            "minItems": 1,
+            "title": "Next Steps"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "title",
+          "strategy",
+          "insight_ids",
+          "proof_gaps",
+          "difficulties",
+          "next_steps"
+        ],
+        "title": "ResearchPath"
+      },
+      "ResearchPlan": {
+        "properties": {
+          "contributor_id": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Contributor Id",
+            "description": "Sequential contributor number encoded as a string"
+          },
+          "contributor_password": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{7}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contributor Password",
+            "description": "Private eight-digit credential, required for new accounts; never publish it"
+          },
+          "contributor_name": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 2,
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
+            "title": "Contributor Name"
+          },
+          "task_id": {
+            "type": "string",
+            "title": "Task Id"
+          },
+          "claim_token": {
+            "type": "string",
+            "title": "Claim Token"
+          },
+          "supersedes_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supersedes Id"
+          },
+          "problem_id": {
+            "type": "string",
+            "title": "Problem Id"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Title"
+          },
+          "summary": {
+            "type": "string",
+            "maxLength": 20000,
+            "minLength": 1,
+            "title": "Summary"
+          },
+          "paths": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchPath"
+            },
+            "type": "array",
+            "maxItems": 30,
+            "minItems": 1,
+            "title": "Paths"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "contributor_id",
+          "contributor_name",
+          "task_id",
+          "claim_token",
+          "problem_id",
+          "title",
+          "summary",
+          "paths"
+        ],
+        "title": "ResearchPlan"
+      },
       "Review": {
         "properties": {
           "contributor_id": {
@@ -2709,6 +3062,19 @@
             "pattern": "^[1-9][0-9]*$",
             "title": "Contributor Id",
             "description": "Sequential contributor number encoded as a string"
+          },
+          "contributor_password": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{7}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contributor Password",
+            "description": "Private eight-digit credential, required for new accounts; never publish it"
           },
           "contributor_name": {
             "type": "string",
@@ -2785,13 +3151,25 @@
         ],
         "title": "Review"
       },
-      "Route": {
+      "ReviewBatch": {
         "properties": {
           "contributor_id": {
             "type": "string",
             "pattern": "^[1-9][0-9]*$",
-            "title": "Contributor Id",
-            "description": "Sequential contributor number encoded as a string"
+            "title": "Contributor Id"
+          },
+          "contributor_password": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{7}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contributor Password",
+            "description": "Private eight-digit credential, required for new accounts; never publish it"
           },
           "contributor_name": {
             "type": "string",
@@ -2801,67 +3179,21 @@
             "title": "Contributor Name"
           },
           "task_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "string",
             "title": "Task Id"
           },
           "claim_token": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "string",
             "title": "Claim Token"
           },
-          "supersedes_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Supersedes Id"
-          },
-          "problem_id": {
-            "type": "string",
-            "title": "Problem Id"
-          },
-          "title": {
-            "type": "string",
-            "maxLength": 300,
-            "minLength": 1,
-            "title": "Title"
-          },
-          "summary": {
-            "type": "string",
-            "maxLength": 3000,
-            "minLength": 1,
-            "title": "Summary"
-          },
-          "body": {
-            "type": "string",
-            "maxLength": 100000,
-            "minLength": 1,
-            "title": "Body"
-          },
-          "references": {
+          "reviews": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/ReviewItem"
             },
             "type": "array",
-            "maxItems": 100,
-            "title": "References"
+            "maxItems": 10,
+            "minItems": 1,
+            "title": "Reviews"
           }
         },
         "additionalProperties": false,
@@ -2869,12 +3201,51 @@
         "required": [
           "contributor_id",
           "contributor_name",
-          "problem_id",
-          "title",
-          "summary",
-          "body"
+          "task_id",
+          "claim_token",
+          "reviews"
         ],
-        "title": "Route"
+        "title": "ReviewBatch"
+      },
+      "ReviewItem": {
+        "properties": {
+          "insight_id": {
+            "type": "string",
+            "pattern": "^I[A-Za-z0-9_-]{1,99}$",
+            "title": "Insight Id"
+          },
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "support",
+              "concern",
+              "refute",
+              "needs_work"
+            ],
+            "title": "Verdict"
+          },
+          "rationale": {
+            "type": "string",
+            "maxLength": 30000,
+            "minLength": 1,
+            "title": "Rationale"
+          },
+          "score": {
+            "type": "integer",
+            "maximum": 5.0,
+            "minimum": 1.0,
+            "title": "Score"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "insight_id",
+          "verdict",
+          "rationale",
+          "score"
+        ],
+        "title": "ReviewItem"
       },
       "Solution": {
         "properties": {
@@ -2883,6 +3254,19 @@
             "pattern": "^[1-9][0-9]*$",
             "title": "Contributor Id",
             "description": "Sequential contributor number encoded as a string"
+          },
+          "contributor_password": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{7}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contributor Password",
+            "description": "Private eight-digit credential, required for new accounts; never publish it"
           },
           "contributor_name": {
             "type": "string",
