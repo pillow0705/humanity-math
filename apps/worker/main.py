@@ -54,19 +54,29 @@ def file_hash(p): return hashlib.sha256(p.read_bytes()).hexdigest()
 
 def target_cache_files(target): return CACHE/'targets'/target['target_hash']
 
-def prepare_target(work,target):
-    for dependency in target.get('insight_dependency_snapshot',[]):prepare_target(work,dependency)
+def prepare_target(work,target,prepared=None,visiting=None):
+    prepared=set() if prepared is None else prepared
+    visiting=set() if visiting is None else visiting
+    ident=target['target_hash']
+    if ident in prepared:return
+    if ident in visiting:raise RuntimeError('Cyclic cached target-definition dependency')
+    visiting.add(ident)
     cached=target_cache_files(target)
     meta=json.loads((cached/'manifest.json').read_text())
-    if (meta.get('target_hash')!=target['target_hash'] or meta.get('policy')!=POLICY
+    if (meta.get('target_hash')!=ident or meta.get('policy')!=POLICY
             or meta.get('toolchain')!=TOOLCHAIN or meta.get('library_id')!=LIBRARY_ID):
         raise RuntimeError('Fixed target cache identity mismatch')
-    if file_hash(cached/'module.olean')!=meta['olean_hash']: raise RuntimeError('Fixed target cache corruption')
+    if file_hash(cached/'module.olean')!=meta['olean_hash']:raise RuntimeError('Fixed target cache corruption')
     current_image=docker(['image','inspect','--format','{{.Id}}',IMAGE]).stdout.strip()
-    if current_image!=meta['image']: raise RuntimeError('Fixed target was checked in a different sandbox image')
+    if current_image!=meta['image']:raise RuntimeError('Fixed target was checked in a different sandbox image')
+    dependencies=meta.get('insight_dependency_snapshot',[])
+    if 'insight_dependency_snapshot' in target and target['insight_dependency_snapshot']!=dependencies:raise RuntimeError('Fixed target dependency manifest mismatch')
+    for dependency in dependencies:prepare_target(work,dependency,prepared,visiting)
     destination=work/(target['target_module'].replace('.','/')+'.olean')
     destination.parent.mkdir(parents=True,exist_ok=True)
     shutil.copyfile(cached/'module.olean',destination);os.chmod(destination,0o444)
+    visiting.remove(ident);prepared.add(ident)
+
 
 def prepare(work,arts):
     (work/'MC').mkdir(parents=True,exist_ok=True)
@@ -110,7 +120,7 @@ def verify_target(target,arts):
         axioms=parse_axioms(checklog)
         cached=target_cache_files(target);cached.mkdir(parents=True,exist_ok=True)
         shutil.copyfile(path.with_suffix('.olean'),cached/'module.olean')
-        manifest=dict(target_hash=target['target_hash'],policy=POLICY,toolchain=TOOLCHAIN,library_id=LIBRARY_ID,image=image,olean_hash=file_hash(cached/'module.olean'),axioms=axioms)
+        manifest=dict(target_hash=target['target_hash'],insight_dependency_snapshot=target.get('insight_dependency_snapshot',[]),policy=POLICY,toolchain=TOOLCHAIN,library_id=LIBRARY_ID,image=image,olean_hash=file_hash(cached/'module.olean'),axioms=axioms)
         atomic(cached/'manifest.json',manifest);(cached/'source.lean').write_text(source)
         return dict(status='valid',log=log+'\n'+checklog,axioms=axioms,cache=manifest)
     finally:shutil.rmtree(work,ignore_errors=True)

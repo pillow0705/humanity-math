@@ -178,3 +178,17 @@ def test_proof_queue_waits_for_target_infrastructure_retry(verifier,monkeypatch)
     monkeypatch.setattr(worker,'sync_candidates',lambda tx:None)
     assert not worker.once()
     with verifier.transaction() as tx:assert tx.get('verifications','Vwaiting')['status']=='queued'
+
+
+def test_target_cache_reuses_transitive_definition_modules_without_nested_snapshots(verifier,monkeypatch):
+    monkeypatch.setattr(worker,'sandbox',fake_success)
+    first=target();first.update(insight_dependency_snapshot=[])
+    worker.verify_target(first,[])
+    second=dict(first,id='Isecond',insight_id='Isecond',target_hash='h-second',target_module='MCTargets.Isecond',target_constant='MCTargets.Isecond.statement',insight_dependency_snapshot=[dict(insight_id=first['id'],target_hash=first['target_hash'],target_module=first['target_module'],target_constant=first['target_constant'])])
+    worker.verify_target(second,[])
+    third=dict(first,id='Ithird',insight_id='Ithird',target_hash='h-third',target_module='MCTargets.Ithird',target_constant='MCTargets.Ithird.statement',insight_dependency_snapshot=[dict(insight_id=second['id'],target_hash=second['target_hash'],target_module=second['target_module'],target_constant=second['target_constant'])])
+    worker.verify_target(third,[])
+    work=verifier.root/'consumer';work.mkdir()
+    worker.prepare_target(work,third)
+    assert all((work/(x['target_module'].replace('.','/')+'.olean')).exists() for x in [first,second,third])
+    assert all('insight_dependency_snapshot' not in snapshot for snapshot in third['insight_dependency_snapshot'])

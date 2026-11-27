@@ -36,7 +36,7 @@ def register_target(tx, insight, body, replace_invalid=False, allow_pending_targ
         if ident not in insight.get('references',[]):raise HTTPException(422,'Target-definition dependencies must also appear in the Insight references')
         dependency=get_target(tx,ident)
         if not dependency or not (dependency['status']=='valid' or (dependency['status']=='queued' and ident in allow_pending_target_ids)):raise HTTPException(409,'Import only valid registered target definitions; follow the reference URLs and formalize prerequisite targets first')
-        target_deps.append(dict(insight_id=ident,target_hash=dependency['target_hash'],target_module=dependency['target_module'],target_constant=dependency['target_constant'],insight_dependency_snapshot=dependency.get('insight_dependency_snapshot',[])))
+        target_deps.append(dict(insight_id=ident,target_hash=dependency['target_hash'],target_module=dependency['target_module'],target_constant=dependency['target_constant']))
     definitions, expression = body.get('definitions', ''), body['expression']
     validate_source(definitions, artifacts, target_deps)
     validate_source(expression, artifacts, target_deps)
