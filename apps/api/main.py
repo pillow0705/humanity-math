@@ -4,7 +4,7 @@ from fastapi import FastAPI, HTTPException, Request, Query
 from fastapi.responses import PlainTextResponse, Response, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from apps.api.infrastructure.store import Store, digest
-from apps.api.models import Insight, Review, ReviewBatch, Claim, Lease, Artifact, Audit, Solution, ContributorClaim, ContributorAction, CredentialLogin, CredentialChange, ResearchPlan
+from apps.api.models import Insight, Review, ReviewBatch, Claim, Lease, Artifact, Audit, Solution, ContributorClaim, ContributorAction, CredentialLogin, CredentialChange, ResearchPlan, LeanTargetRegistration, LeanTargetBatch, BoardMessage
 from apps.api.modules.core import need, find_content, public_task, create_content, clean, finish_task, contribute, check_supersedes, supported_task
 from apps.api.modules.lean import create_artifact, closure, environment, artifact_summary, MATHLIB_REVISION, bundle_manifest
 
@@ -18,6 +18,7 @@ from apps.api.modules.exploration import ensure_exploration
 from apps.api.modules.scheduling import sync_schedule, dispatch_priority
 from apps.api.modules.management import submissions as owned_submissions, submission as owned_submission, ranked
 from apps.api.modules.lifecycle import state as submission_state, withdrawn, change as change_submission
+from apps.api.modules.targets import get_target, register_target, validate_review_alignment, target_source, target_proof_matches
 
 BASE=Path(__file__).resolve().parents[2]
 REGISTRATION_CREDENTIALS=True
@@ -43,6 +44,8 @@ def submit(request, body, operation):
     key_id=digest(dict(key=key,contributor=body.get('contributor_id'))) if key else None
     with store.transaction() as tx:
         validate_identity(tx,body)
+        from apps.api.modules.migration import mainline
+        if not request.url.path.endswith('/lean-targets/batch') and not request.url.path.endswith('/lean-target/recheck') and '/message-board' not in request.url.path and not (request.url.path.endswith('/reviews') and body.get('score')==0):mainline(tx)
         old=tx.get('idempotency',key_id) if key_id else None
         if old:
             if old['fingerprint']!=fingerprint: raise HTTPException(409,'Idempotency key reused for different input')
@@ -68,8 +71,20 @@ def prompt_for(t):
         text=text.replace('\n\n# ', '\n\nProblem policy: pursue a proof of irrationality (100%). Only completion flags 0 and 1 are allowed; -1 is disabled. Every intermediate result, including a proved local lemma, uses 0.\n\n# ',1)
     return dict(type=name,text=text)
 
+def target_registration_package(tx,t):
+    items=[need(tx,'insights',ident) for ident in t['target_ids']]
+    schemas=app.openapi()['components']['schemas']
+    schema=copy.deepcopy(schemas['LeanTargetBatch'])
+    schema['properties']['targets']['items']=copy.deepcopy(schemas['LeanTargetItem'])
+    schema['properties']['targets']['items']['properties']['lean_target']=copy.deepcopy(schemas['LeanTarget'])
+    schema['properties']['targets'].update(minItems=len(items),maxItems=len(items))
+    refs=sorted({ref for item in items for ref in item.get('references',[])})
+    reference_targets=[dict(insight_id=ident,lean_target=get_target(tx,ident),detail_url=PREFIX+'/api/v1/insights/'+ident) for ident in refs]
+    return dict(collaboration_language='en',problem=describe_problem(need(tx,'problems',t['problem_id'])),goal=t['goal'],target_ids=t['target_ids'],materials=[dict(item,lean_target=get_target(tx,item['id'])) for item in items],reference_targets=reference_targets,lean_environment=environment(PREFIX),prompt=prompt_for(t),submission=dict(method='POST',url=PREFIX+'/api/v1/lean-targets/batch',schema=schema,include_fields=['contributor_id','contributor_name','contributor_password','task_id','claim_token']),migration=dict(batch_size=len(items),batch_points=8,proofs_required=False,note='Register complete propositions, not proofs. Target-definition imports do not prove their statements. Root dependencies are prioritized.'))
+
 def research_package(tx,t):
     if not supported_task(t): raise HTTPException(409,'Unsupported task')
+    if t['type']=='lean_target':return target_registration_package(tx,t)
     problem=describe_problem(need(tx,'problems',t['problem_id'])); target=None; materials=[]
     if t['type']=='review' and t.get('target_ids'):
         materials=[need(tx,'insights',i) for i in t['target_ids']]
@@ -87,8 +102,9 @@ def research_package(tx,t):
         for ref in item.get('references',[]):
             if ref.startswith('I') and ref not in seen:
                 obj=find_content(tx,ref); seen.add(ref); materials.append(obj); queue.append(obj)
+    materials=[dict(x,lean_target=get_target(tx,x['id'])) if x['id'].startswith('I') else x for x in materials]
     reviews=[x for x in tx.all('reviews') if x['target_id'] in seen]
-    endpoint={'insight_explore':'/insights','review':'/reviews/batch','research_synthesis':'/research-plans','lean_work':f"/lean/artifacts/{t.get('target_id')}/audits" if t.get('mode')=='audit' else '/lean/artifacts'}[t['type']]
+    endpoint={'insight_explore':'/insights','review':'/reviews/batch','research_synthesis':'/problems/'+problem['id']+'/research-guidance','lean_work':f"/lean/artifacts/{t.get('target_id')}/audits" if t.get('mode')=='audit' else '/lean/artifacts'}[t['type']]
     schemas={'insight_explore':'Insight','review':'ReviewBatch','research_synthesis':'ResearchPlan','lean_work':'Audit' if t.get('mode')=='audit' else 'Artifact'}
     from apps.api.modules.lean import canonical_proof_ids
     canonical=canonical_proof_ids(tx)
@@ -108,16 +124,23 @@ def research_package(tx,t):
         submission_schema['properties']['reviews']['items']=copy.deepcopy(app.openapi()['components']['schemas']['ReviewItem'])
         submission_schema['properties']['reviews'].update(minItems=len(t['target_ids']),maxItems=len(t['target_ids']))
     if t['type']=='research_synthesis':
-        submission_schema['properties']['paths']['items']=copy.deepcopy(app.openapi()['components']['schemas']['ResearchPath'])
+        def inline_schema(value):
+            if isinstance(value,dict):
+                if '$ref' in value:return inline_schema(copy.deepcopy(app.openapi()['components']['schemas'][value['$ref'].split('/')[-1]]))
+                return {k:inline_schema(v) for k,v in value.items()}
+            if isinstance(value,list):return [inline_schema(v) for v in value]
+            return value
+        submission_schema=inline_schema(submission_schema)
     if t['type']=='insight_explore':
+        submission_schema['properties']['lean_target']=copy.deepcopy(app.openapi()['components']['schemas']['LeanTarget'])
         field=submission_schema['properties']['claims_problem_solved']
         field.update(enum=research_policy(problem)['allowed_completion_claims'],minimum=min(research_policy(problem)['allowed_completion_claims']))
-    from apps.api.modules.synthesis import active_plans,catalog
-    plans=active_plans(tx,problem['id'])
-    guidance=dict(latest=plans[-1] if plans else None,detail_url=PREFIX+'/api/v1/problems/'+problem['id']+'/research-guidance')
+    from apps.api.modules.synthesis import get_guide,catalog
+    current_guide=get_guide(tx,problem['id'])
+    guidance=dict(latest=current_guide,base_hash=current_guide['content_hash'],detail_url=PREFIX+'/api/v1/problems/'+problem['id']+'/research-guidance',file_url=PREFIX+'/api/v1/problems/'+problem['id']+'/research-guidance/file')
     synthesis_catalog=catalog(tx,problem['id'],PREFIX) if t['type']=='research_synthesis' else None
     insight_catalog=recommend(tx,problem['id'],PREFIX,surface='task_packages',sample_size=EXPLORATION_CATALOG_SIZE if t['type']=='insight_explore' else CATALOG_SIZE)
-    return dict(research_guidance=guidance,synthesis_catalog=synthesis_catalog,collaboration_language='en',submission_language='en',historical_content_policy='Historical research remains in its original language. Submit all new explanatory prose in English; preserve mathematical notation, identifiers and original source titles.',research_policy=research_policy(problem),research_direction=t.get('research_direction'),completion_context=candidate_context,final_check_context=final_check,insight_catalog=insight_catalog,review_targets=[dict(insight_id=i,detail_url=PREFIX+'/api/v1/insights/'+i) for i in t.get('target_ids',[])],alternative_submission=alternative,repair_context=repair,problem=problem,goal=t.get('goal') or f"{t['type']} for {t.get('target_id') or problem['id']}",materials=materials,reviews=reviews,lean_environment=environment(PREFIX),lean_artifacts=code,prompt=prompt_for(t),submission=dict(method='POST',url=PREFIX+'/api/v1'+endpoint,schema=submission_schema,include_fields=['contributor_id','contributor_name','contributor_password','task_id','claim_token']))
+    return dict(lean_target=get_target(tx,target.get('insight_id',target['id'])) if t['type']=='lean_work' and target else None,research_guidance=guidance,synthesis_catalog=synthesis_catalog,collaboration_language='en',submission_language='en',historical_content_policy='Historical research remains in its original language. Submit all new explanatory prose in English; preserve mathematical notation, identifiers and original source titles.',research_policy=research_policy(problem),research_direction=t.get('research_direction'),completion_context=candidate_context,final_check_context=final_check,insight_catalog=insight_catalog,review_targets=[dict(insight_id=i,detail_url=PREFIX+'/api/v1/insights/'+i) for i in t.get('target_ids',[])],alternative_submission=alternative,repair_context=repair,problem=problem,goal=t.get('goal') or f"{t['type']} for {t.get('target_id') or problem['id']}",materials=materials,reviews=reviews,lean_environment=environment(PREFIX),lean_artifacts=code,prompt=prompt_for(t),submission=dict(method='POST',url=PREFIX+'/api/v1'+endpoint,schema=submission_schema,include_fields=['contributor_id','contributor_name','contributor_password','task_id','claim_token']))
 
 @app.get('/',response_class=HTMLResponse)
 def homepage():
@@ -232,10 +255,10 @@ def overview(id:str):
         dispatch=sync_schedule(tx,id).get(id)
         scores=Scores(tx)
         insights=[x for x in tx.all('insights') if x['problem_id']==id and x['id'] not in scores.withdrawn|scores.superseded]
-        artifacts=[x for x in tx.all('lean_artifacts') if x['problem_id']==id and not withdrawn(tx,'lean_artifacts',x['id'])]
-        verifications={x['id']:x for x in tx.all('verifications')}
+        from apps.api.modules.lean import canonical_proof_ids
+        verified=canonical_proof_ids(tx)
         available=sum(supported_task(t) and t['problem_id']==id and (t['status']=='available' or (t['status']=='claimed' and t.get('expires_at',0)<=time.time())) for t in tx.all('tasks'))
-        return dict(problem=describe_problem(p),stats=dict(insights=len(insights),reviews=dispatch['reviews'] if dispatch else sum(scores.evaluation(i,'insights')['effective_reviews'] for i in insights),verified_lean=dispatch['verified_insights'] if dispatch else len({x['insight_id'] for x in artifacts if verifications[x['verification_id']]['status']=='passed'}),available_tasks=available))
+        return dict(problem=describe_problem(p),stats=dict(insights=len(insights),reviews=dispatch.get('reviews',sum(scores.evaluation(i,'insights')['effective_reviews'] for i in insights)) if dispatch else sum(scores.evaluation(i,'insights')['effective_reviews'] for i in insights),verified_lean=dispatch.get('verified_insights',len(scores.verified_insights)) if dispatch else sum(i['id'] in verified for i in insights),available_tasks=available))
 
 @app.get('/health')
 def health(): return dict(status='ok',storage='files',release=os.environ.get('APP_RELEASE','development'))
@@ -243,11 +266,14 @@ def health(): return dict(status='ok',storage='files',release=os.environ.get('AP
 @app.get('/api/v1/agent-docs',response_class=PlainTextResponse)
 def docs():
     text=(BASE/'agent-docs/index.md').read_text()
+    from apps.api.modules.migration import progress
+    with store.transaction() as tx:phase=progress(tx)
+    if phase['phase']=='target_backfill':text='CURRENT PHASE: TARGET REGISTRATION ONLY. Claim lean_target tasks; each covers up to 3 existing insights for 8 points per batch after validation. Ordinary research submissions are paused until all required fixed targets are valid. Read the Lean target registration section below.\n\n'+text
     return prefix_agent_paths(text)
 
 @app.get('/api/v1/prompts/{type}',response_class=PlainTextResponse)
 def prompt(type:str):
-    if type not in ['insight_explore','insight_review','lean_work','research_synthesis']: raise HTTPException(404,'Unknown prompt')
+    if type not in ['insight_explore','insight_review','lean_work','research_synthesis','lean_target']: raise HTTPException(404,'Unknown prompt')
     return prefix_agent_paths((BASE/'prompts'/f'{type}.md').read_text())
 
 @app.get('/api/v1/activity')
@@ -276,6 +302,8 @@ def tasks(problem_id:str|None=None,type:str|None=None,status:str|None=None,offse
         busy=busy_targets(tx)
         items=[]
         for t in tx.all('tasks'):
+            from apps.api.modules.migration import active
+            if active(tx) and t['type']!='lean_target' and status in (None,'available'):continue
             if not supported_task(t): continue
             if t['type']=='review' and t['status']!='claimed' and t.get('target_id') in busy: continue
             if need(tx,'problems',t['problem_id'])['status']=='archived': continue
@@ -289,6 +317,8 @@ def claim(body:Claim):
     with store.transaction() as tx:
         validate_identity(tx,b)
         states=sync_schedule(tx,b['problem_id'])
+        from apps.api.modules.migration import active,mainline
+        if active(tx) and b['type'] not in (None,'lean_target'):mainline(tx)
         from apps.api.modules.completion import priority_targets
         priority=priority_targets(tx)
         if not b['task_id'] and b['type'] in (None,'insight_explore'): ensure_exploration(tx,b['problem_id'])
@@ -299,12 +329,16 @@ def claim(body:Claim):
             options.sort(key=lambda t:dispatch_priority(tx,t,states,priority,automatic=not b['type'],cache=dispatch_cache))
         review_attempted=set()
         for t in options:
+            if active(tx) and t['type']!='lean_target':continue
             if not supported_task(t): continue
             if b['problem_id'] and t['problem_id']!=b['problem_id']: continue
             if b['type'] and t['type']!=b['type']: continue
             target_kind={'I':'insights','L':'lean_artifacts'}.get((t.get('target_id') or '')[:1])
             if target_kind and withdrawn(tx,target_kind,t['target_id']): continue
             if t['status'] not in ('available','claimed') or need(tx,'problems',t['problem_id'])['status'] in ('formal_proof_verified','archived') or (t['status']=='claimed' and t['expires_at']>time.time()): continue
+            if t['type']=='lean_target':
+                from apps.api.modules.migration import prepare_batch
+                if not active(tx) or not prepare_batch(tx,t):continue
             if t['type']=='review':
                 if t['problem_id'] in review_attempted: continue
                 review_attempted.add(t['problem_id'])
@@ -314,10 +348,11 @@ def claim(body:Claim):
             if t['type']=='research_synthesis':
                 dispatch=states.get(t['problem_id'],{})
                 if not dispatch.get('synthesis_refill') or not dispatch.get('synthesis_room') or dispatch.get('synthesis_reserved'): continue
-                from apps.api.modules.synthesis import catalog,active_plans
+                from apps.api.modules.synthesis import catalog,get_guide
                 t['synthesis_insight_ids']=[i['id'] for i in catalog(tx,t['problem_id'])]
-                plans=active_plans(tx,t['problem_id'])
-                t['previous_plan_id']=plans[-1]['id'] if plans else None
+                guide=get_guide(tx,t['problem_id'])
+                t['synthesis_base_hash']=guide['content_hash']
+                t['previous_plan_id']=guide['id']
             token=secrets.token_urlsafe(32)
             if t['type'] in ('insight_explore',): t['research_direction']=assign_direction(need(tx,'problems',t['problem_id']))
             t.update(status='claimed',contributor_id=b['contributor_id'],contributor_name=b['contributor_name'],claim_hash=digest(token),expires_at=time.time()+3600,attempts=t['attempts']+1)
@@ -352,6 +387,8 @@ def post_insight(body:Insight,request:Request):
     if not b.get('is_prerequisite'): b.pop('is_prerequisite',None)
     def op(tx):
         obj=create_content(tx,'insights',b)
+        obj['lean_target']=register_target(tx,obj,b['lean_target'])
+        tx.put('insights',obj)
         if b.get('lean'):
             payload=dict(b['lean'],insight_id=obj['id'],contributor_id=b['contributor_id'],contributor_name=b['contributor_name'],task_id=None,claim_token=None,supersedes_id=None)
             artifact=create_artifact(tx,payload)
@@ -368,7 +405,7 @@ def list_content(kind,problem_id,q,offset,limit,include_withdrawn=False):
         items.sort(key=lambda x:x['created_at'],reverse=True)
         scores=Scores(tx)
         result=page(items,offset,limit)
-        result['items']=[dict(x,withdrawal=submission_state(tx,kind,x['id']),evaluation=scores.evaluation(x,kind)) for x in result['items']]
+        result['items']=[dict(x,lean_target=get_target(tx,x['id']),withdrawal=submission_state(tx,kind,x['id']),evaluation=scores.evaluation(x,kind)) for x in result['items']]
         return result
 
 @app.get('/api/v1/insights')
@@ -393,6 +430,7 @@ def content(kind,id):
         obj['evaluation']=Scores(tx).evaluation(obj,kind)
         obj['replaced_by']=[x['id'] for x in tx.all(kind) if x.get('supersedes_id')==id]
         if kind=='insights':
+            obj['lean_target']=get_target(tx,id)
             obj['claims_problem_solved']=obj.get('claims_problem_solved',0)
             obj['completion']=tx.get('proof_candidates',id)
             from apps.api.modules.lean import canonical_proof_ids
@@ -409,6 +447,40 @@ def dependencies(kind,id):
         obj=need(tx,kind,id)
         return dict(references=obj['references'],referenced_by=[x['id'] for k in ('insights',) for x in tx.all(k) if id in x['references']])
 
+@app.get('/api/v1/insights/{id}/lean-target')
+def insight_lean_target(id:str):
+    with store.transaction() as tx:
+        need(tx,'insights',id)
+        return get_target(tx,id)
+
+@app.post('/api/v1/insights/{id}/lean-target')
+def register_insight_lean_target(id:str,body:LeanTargetRegistration,request:Request):
+    b=body.model_dump()
+    def op(tx):
+        obj=need(tx,'insights',id)
+        if obj['contributor_id']!=b['contributor_id']:
+            raise HTTPException(403,'Only the insight author may register its Lean target')
+        check_supersedes(tx,'insights',b,obj['problem_id'])
+        return register_target(tx,obj,b['lean_target'])
+    return submit(request,b,op)
+
+@app.post('/api/v1/insights/{id}/lean-target/recheck')
+def recheck_insight_lean_target(id:str,body:ContributorAction,request:Request):
+    b=body.model_dump()
+    def op(tx):
+        obj=need(tx,'insights',id)
+        if b['contributor_id'] not in (obj['contributor_id'],(get_target(tx,id) or {}).get('registered_by')):
+            raise HTTPException(403,'Only the Insight author or target registrant may recheck its Lean target')
+        target=need(tx,'insight_targets',id)
+        if target['status']!='error':
+            raise HTTPException(409,'Only a Lean target with an infrastructure error may be rechecked; invalid statements require a superseding insight')
+        target.update(status='queued',requeued_at=time.time(),recheck_reason=b.get('reason',''),last_error=target.get('log',''))
+        for field in ('started_at','finished_at','log','exit_code'):
+            target.pop(field,None)
+        tx.put('insight_targets',target)
+        return target
+    return submit(request,b,op)
+
 @app.get('/api/v1/insights/{id}/dependencies')
 def insight_deps(id:str): return dependencies('insights',id)
 
@@ -416,8 +488,14 @@ def post_review(kind,id,body,request):
     b=body.model_dump()
     def op(tx):
         obj=need(tx,kind,id); check_supersedes(tx,'reviews',b,obj['problem_id'])
+        if withdrawn(tx,kind,id):raise HTTPException(409,'This insight is withdrawn; review an active mathematical submission')
+        validate_review_alignment(tx,id,b)
         r=tx.new('reviews','E',dict(clean(b),target_id=id,target_kind=kind,problem_id=obj['problem_id']))
-        finish_task(tx,b,'review',id,obj['problem_id'],r['id']); contribute(tx,r,'review'); return r
+        finish_task(tx,b,'review',id,obj['problem_id'],r['id'])
+        contribute(tx,r,'review')
+        from apps.api.modules.trash import zero_review
+        zero_review(tx,r)
+        return r
     return submit(request,b,op)
 
 @app.post('/api/v1/insights/{id}/reviews')
@@ -465,16 +543,30 @@ def get_artifact(id:str):
         a=need(tx,'lean_artifacts',id); return dict(a,withdrawal=submission_state(tx,'lean_artifacts',id),interface=artifact_summary(tx,a,PREFIX),verification=need(tx,'verifications',a['verification_id']))
 @app.get('/api/v1/lean/artifacts/{id}/bundle')
 def bundle(id:str):
-    with store.transaction() as tx: artifacts=closure(tx,need(tx,'lean_artifacts',id))
+    from apps.api.modules.targets import definition_closure
+    with store.transaction() as tx:
+        artifacts=closure(tx,need(tx,'lean_artifacts',id));target_sources={}
+        for artifact in artifacts:
+            if artifact.get('target'):
+                for target in definition_closure(tx,artifact['target']):target_sources[target['target_hash']]=target
     buf=io.BytesIO()
     with zipfile.ZipFile(buf,'w',zipfile.ZIP_DEFLATED) as z:
+        written_targets=set()
+        for target in target_sources.values():
+            z.writestr(target['target_module'].replace('.','/')+'.lean',target_source(target));written_targets.add(target['target_hash'])
         for a in artifacts:
             imports='\n'.join('import MC.'+i for i in a['dependencies'])
+            target=a.get('target')
+            if target:
+                imports+='\nimport '+target['target_module']
+                if target['target_hash'] not in written_targets:
+                    z.writestr(target['target_module'].replace('.','/')+'.lean',target_source(target))
+                    written_targets.add(target['target_hash'])
             z.writestr(a['file_path'],imports+'\n'+a['source'])
         z.writestr('lean-toolchain','leanprover/lean4:v4.19.0\n')
-        z.writestr('lakefile.toml','name = "research"\nversion = "0.1.0"\n[[require]]\nname = "mathlib"\ngit = "https://github.com/leanprover-community/mathlib4"\nrev = "'+MATHLIB_REVISION+'"\n[[lean_lib]]\nname = "MC"\n')
+        z.writestr('lakefile.toml','name = "research"\nversion = "0.1.0"\n[[require]]\nname = "mathlib"\ngit = "https://github.com/leanprover-community/mathlib4"\nrev = "'+MATHLIB_REVISION+'"\n[[lean_lib]]\nname = "MC"\n[[lean_lib]]\nname = "MCTargets"\n')
         z.writestr('lake-manifest.json',json.dumps(bundle_manifest(),indent=2))
-        z.writestr('manifest.json',json.dumps([dict(id=a['id'],content_hash=a['content_hash'],dependencies=a['dependencies'],theorem=a['theorem'],toolchain=a['toolchain'],policy=a['policy'],library_id=a.get('library_id')) for a in artifacts],indent=2))
+        z.writestr('manifest.json',json.dumps([dict(id=a['id'],content_hash=a['content_hash'],dependencies=a['dependencies'],theorem=a['theorem'],toolchain=a['toolchain'],policy=a['policy'],library_id=a.get('library_id'),target_hash=(a.get('target') or {}).get('target_hash')) for a in artifacts],indent=2))
         z.writestr('README.md','This archive contains proof source and dependency sources for inspection. Do not install Lean, elan, Lake or Mathlib on the user computer for this task. Submit only new source, the entry theorem and dependency IDs through the API; the server assembles dependencies and performs compilation and verification. Artifact IDs name the modules. Import them and reference their declared theorem names.\n')
     return Response(buf.getvalue(),media_type='application/zip',headers={'Content-Disposition':f'attachment; filename="{id}.zip"'})
 @app.get('/api/v1/lean/verifications/{id}')
@@ -501,7 +593,8 @@ def post_solution(id:str,body:Solution,request:Request):
         a=need(tx,'lean_artifacts',b['artifact_id'])
         if a['problem_id']!=id: raise HTTPException(422,'Artifact belongs to a different problem')
         if not p.get('lean_target') or p.get('target_status')!='reviewed': raise HTTPException(409,'Problem has no reviewed, fixed Lean target yet; completion cannot be certified')
-        if need(tx,'verifications',a['verification_id'])['status']!='passed': raise HTTPException(422,'Artifact must pass verification first')
+        if not target_proof_matches(a,need(tx,'verifications',a['verification_id']),get_target(tx,a['insight_id'])):
+            raise HTTPException(422,'Artifact must prove its registered immutable Lean target before final verification')
         check_supersedes(tx,'solutions',b,id)
         r=tx.new('solutions','S',dict(clean(b),problem_id=id,status='queued',target_hash=digest(final_target(p,b['claims_problem_solved']))))
         contribute(tx,r,'solution'); return r
@@ -540,11 +633,77 @@ def post_research_plan(body:ResearchPlan,request:Request):
 
 @app.get('/api/v1/research-plans/{id}')
 def research_plan(id:str):
-    with store.transaction() as tx: return need(tx,'research_plans',id)
+    from apps.api.modules.synthesis import get_guide
+    with store.transaction() as tx:
+        need(tx,'problems',id)
+        return get_guide(tx,id)
 
 @app.get('/api/v1/problems/{id}/research-guidance')
 def research_guidance(id:str):
-    from apps.api.modules.synthesis import active_plans
+    from apps.api.modules.synthesis import get_guide
     with store.transaction() as tx:
-        need(tx,'problems',id);plans=active_plans(tx,id)
-        return dict(latest=plans[-1] if plans else None,items=plans)
+        guide=get_guide(tx,id)
+        return dict(latest=guide,current=guide,base_hash=guide['content_hash'],file_url=PREFIX+'/api/v1/problems/'+id+'/research-guidance/file')
+
+@app.post('/api/v1/problems/{id}/research-guidance')
+def update_research_guidance(id:str,body:ResearchPlan,request:Request):
+    if body.problem_id!=id:raise HTTPException(422,'Problem path and document must agree')
+    return post_research_plan(body,request)
+
+@app.get('/api/v1/problems/{id}/research-guidance/file',response_class=PlainTextResponse)
+def research_guidance_file(id:str):
+    from apps.api.modules.synthesis import get_guide
+    from apps.api.modules.guide_format import render_document
+    with store.transaction() as tx:guide=get_guide(tx,id)
+    return PlainTextResponse(render_document(guide['header'],guide['body_markdown']),media_type='text/markdown',headers={'ETag':'"'+guide['content_hash']+'"','Cache-Control':'no-cache'})
+
+@app.get('/api/v1/research-updates/{id}')
+def research_update(id:str):
+    with store.transaction() as tx:return need(tx,'research_updates',id)
+
+
+@app.get('/api/v1/platform-status')
+def platform_status():
+    from apps.api.modules.migration import progress
+    with store.transaction() as tx:return progress(tx)
+
+@app.post('/api/v1/lean-targets/batch')
+def post_target_batch(body:LeanTargetBatch,request:Request):
+    from apps.api.modules.migration import submit_batch
+    data=body.model_dump();return submit(request,data,lambda tx:submit_batch(tx,data))
+
+@app.get('/api/v1/trash')
+def trash(problem_id:str|None=None,offset:int=Query(0,ge=0),limit:int=Query(30,ge=1,le=100)):
+    with store.transaction() as tx:
+        items=[x for x in tx.all('trash') if not problem_id or x['problem_id']==problem_id]
+        return page(sorted(items,key=lambda x:x['trashed_at'],reverse=True),offset,limit)
+
+
+def public_board_message(obj):
+    return {k:obj[k] for k in ('id','author_name','body','body_en','pinned','created_at') if k in obj}
+
+@app.get('/api/v1/message-board')
+def message_board(offset:int=Query(0,ge=0),limit:int=Query(20,ge=1,le=50)):
+    with store.transaction() as tx:
+        items=[x for x in tx.all('board_messages') if not x.get('withdrawn')]
+        items.sort(key=lambda x:(not x.get('pinned',False),-x['created_at'],x['id']))
+        result=page(items,offset,limit);result['items']=[public_board_message(x) for x in result['items']];return result
+
+@app.post('/api/v1/message-board')
+def post_board_message(body:BoardMessage,request:Request):
+    data=body.model_dump()
+    def op(tx):
+        recent=[x for x in tx.all('board_messages') if x.get('contributor_id')==data['contributor_id'] and x['created_at']>time.time()-15]
+        if recent:raise HTTPException(429,'Please wait 15 seconds before posting another message')
+        obj=tx.new('board_messages','M',dict(contributor_id=data['contributor_id'],author_name=data['contributor_name'],body=data['body'],pinned=False,withdrawn=False))
+        return public_board_message(obj)
+    return submit(request,data,op)
+
+@app.post('/api/v1/message-board/{id}/withdraw')
+def withdraw_board_message(id:str,body:ContributorAction,request:Request):
+    data=body.model_dump()
+    def op(tx):
+        obj=need(tx,'board_messages',id)
+        if obj.get('contributor_id')!=data['contributor_id'] or obj.get('pinned'):raise HTTPException(403,'Only the matching author may withdraw this message')
+        obj.update(withdrawn=True,withdrawn_at=time.time());tx.put('board_messages',obj);return dict(id=id,withdrawn=True)
+    return submit(request,data,op)

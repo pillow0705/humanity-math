@@ -5,6 +5,8 @@ from apps.api.modules.lifecycle import withdrawn
 
 
 def ensure_exploration(tx,problem_id=None):
+    from apps.api.modules.migration import active
+    if active(tx):return []
     problems=[p for p in tx.all('problems') if p['status']=='open' and (not problem_id or p['id']==problem_id)]
     tasks=tx.all('tasks');now=time.time();created=[]
     # Retire the former per-insight exploration rule while preserving live leases.

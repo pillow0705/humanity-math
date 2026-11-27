@@ -1475,6 +1475,135 @@
         }
       }
     },
+    "/api/v1/insights/{id}/lean-target": {
+      "get": {
+        "summary": "Insight Lean Target",
+        "operationId": "insight_lean_target_api_v1_insights__id__lean_target_get",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Register Insight Lean Target",
+        "operationId": "register_insight_lean_target_api_v1_insights__id__lean_target_post",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LeanTargetRegistration"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/insights/{id}/lean-target/recheck": {
+      "post": {
+        "summary": "Recheck Insight Lean Target",
+        "operationId": "recheck_insight_lean_target_api_v1_insights__id__lean_target_recheck_post",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContributorAction"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/insights/{id}/dependencies": {
       "get": {
         "summary": "Insight Deps",
@@ -2351,6 +2480,378 @@
             }
           }
         }
+      },
+      "post": {
+        "summary": "Update Research Guidance",
+        "operationId": "update_research_guidance_api_v1_problems__id__research_guidance_post",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResearchPlan"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/problems/{id}/research-guidance/file": {
+      "get": {
+        "summary": "Research Guidance File",
+        "operationId": "research_guidance_file_api_v1_problems__id__research_guidance_file_get",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/research-updates/{id}": {
+      "get": {
+        "summary": "Research Update",
+        "operationId": "research_update_api_v1_research_updates__id__get",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/platform-status": {
+      "get": {
+        "summary": "Platform Status",
+        "operationId": "platform_status_api_v1_platform_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/lean-targets/batch": {
+      "post": {
+        "summary": "Post Target Batch",
+        "operationId": "post_target_batch_api_v1_lean_targets_batch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LeanTargetBatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/trash": {
+      "get": {
+        "summary": "Trash",
+        "operationId": "trash_api_v1_trash_get",
+        "parameters": [
+          {
+            "name": "problem_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Problem Id"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 30,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/message-board": {
+      "get": {
+        "summary": "Message Board",
+        "operationId": "message_board_api_v1_message_board_get",
+        "parameters": [
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Post Board Message",
+        "operationId": "post_board_message_api_v1_message_board_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BoardMessage"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/message-board/{id}/withdraw": {
+      "post": {
+        "summary": "Withdraw Board Message",
+        "operationId": "withdraw_board_message_api_v1_message_board__id__withdraw_post",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContributorAction"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     }
   },
@@ -2559,6 +3060,56 @@
         ],
         "title": "Audit"
       },
+      "BoardMessage": {
+        "properties": {
+          "contributor_id": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Contributor Id"
+          },
+          "contributor_password": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{7}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contributor Password",
+            "description": "Private eight-digit credential, required for new accounts; never publish it"
+          },
+          "contributor_name": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 2,
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
+            "title": "Contributor Name"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Reason",
+            "default": ""
+          },
+          "body": {
+            "type": "string",
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Body",
+            "description": "A short human message; Chinese and English are both welcome. No contribution points are awarded."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "contributor_id",
+          "contributor_name",
+          "body"
+        ],
+        "title": "BoardMessage"
+      },
       "Claim": {
         "properties": {
           "contributor_id": {
@@ -2617,7 +3168,8 @@
                   "insight_explore",
                   "review",
                   "lean_work",
-                  "research_synthesis"
+                  "research_synthesis",
+                  "lean_target"
                 ]
               },
               {
@@ -2771,6 +3323,37 @@
         ],
         "title": "CredentialLogin"
       },
+      "GuideHeader": {
+        "properties": {
+          "format": {
+            "type": "string",
+            "const": "humanity-proof-graphs-v1",
+            "title": "Format",
+            "default": "humanity-proof-graphs-v1"
+          },
+          "problem_id": {
+            "type": "string",
+            "title": "Problem Id"
+          },
+          "graphs": {
+            "items": {
+              "$ref": "#/components/schemas/ProofGraph"
+            },
+            "type": "array",
+            "maxItems": 30,
+            "minItems": 1,
+            "title": "Graphs",
+            "description": "Multiple substantially different proof approaches; no four-route cap. Merge overlapping or cosmetically renamed routes."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "problem_id",
+          "graphs"
+        ],
+        "title": "GuideHeader"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -2881,6 +3464,9 @@
             ],
             "title": "Supersedes Id"
           },
+          "lean_target": {
+            "$ref": "#/components/schemas/LeanTarget"
+          },
           "is_prerequisite": {
             "type": "boolean",
             "title": "Is Prerequisite",
@@ -2958,6 +3544,7 @@
         "required": [
           "contributor_id",
           "contributor_name",
+          "lean_target",
           "problem_id",
           "title",
           "claim",
@@ -2965,6 +3552,175 @@
           "proof_status"
         ],
         "title": "Insight"
+      },
+      "LeanTarget": {
+        "properties": {
+          "definitions": {
+            "type": "string",
+            "maxLength": 50000,
+            "title": "Definitions",
+            "description": "Ordinary Lean definitions/imports needed to state the fixed proposition; no proof placeholders or new axioms",
+            "default": ""
+          },
+          "expression": {
+            "type": "string",
+            "maxLength": 20000,
+            "minLength": 1,
+            "title": "Expression",
+            "description": "A complete Lean proposition, including all intended quantifiers and hypotheses; not a theorem declaration or proof"
+          },
+          "dependencies": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "title": "Dependencies",
+            "description": "Previously verified proof artifact IDs needed by the proposition; frozen when registered"
+          },
+          "insight_dependencies": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Insight Dependencies",
+            "description": "Insight IDs whose valid fixed target definitions are imported; these imports do not supply proofs"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expression"
+        ],
+        "title": "LeanTarget"
+      },
+      "LeanTargetBatch": {
+        "properties": {
+          "contributor_id": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Contributor Id"
+          },
+          "contributor_password": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{7}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contributor Password",
+            "description": "Private eight-digit credential, required for new accounts; never publish it"
+          },
+          "contributor_name": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 2,
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
+            "title": "Contributor Name"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Reason",
+            "default": ""
+          },
+          "task_id": {
+            "type": "string",
+            "title": "Task Id"
+          },
+          "claim_token": {
+            "type": "string",
+            "title": "Claim Token"
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/LeanTargetItem"
+            },
+            "type": "array",
+            "maxItems": 3,
+            "minItems": 1,
+            "title": "Targets"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "contributor_id",
+          "contributor_name",
+          "task_id",
+          "claim_token",
+          "targets"
+        ],
+        "title": "LeanTargetBatch"
+      },
+      "LeanTargetItem": {
+        "properties": {
+          "insight_id": {
+            "type": "string",
+            "pattern": "^I[A-Za-z0-9_-]{1,99}$",
+            "title": "Insight Id"
+          },
+          "lean_target": {
+            "$ref": "#/components/schemas/LeanTarget"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "insight_id",
+          "lean_target"
+        ],
+        "title": "LeanTargetItem"
+      },
+      "LeanTargetRegistration": {
+        "properties": {
+          "contributor_id": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Contributor Id"
+          },
+          "contributor_password": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{7}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contributor Password",
+            "description": "Private eight-digit credential, required for new accounts; never publish it"
+          },
+          "contributor_name": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 2,
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
+            "title": "Contributor Name"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Reason",
+            "default": ""
+          },
+          "lean_target": {
+            "$ref": "#/components/schemas/LeanTarget"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "contributor_id",
+          "contributor_name",
+          "lean_target"
+        ],
+        "title": "LeanTargetRegistration"
       },
       "Lease": {
         "properties": {
@@ -2986,65 +3742,95 @@
         ],
         "title": "Lease"
       },
-      "ResearchPath": {
+      "MissingBlock": {
         "properties": {
+          "node_id": {
+            "type": "string",
+            "title": "Node Id"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Description"
+          },
+          "next_step": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Next Step"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "node_id",
+          "description",
+          "next_step"
+        ],
+        "title": "MissingBlock"
+      },
+      "ProofGraph": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,79}$",
+            "title": "Id"
+          },
           "title": {
             "type": "string",
             "maxLength": 300,
             "minLength": 1,
             "title": "Title"
           },
-          "strategy": {
+          "approach": {
             "type": "string",
-            "maxLength": 15000,
+            "maxLength": 2000,
             "minLength": 1,
-            "title": "Strategy"
+            "title": "Approach"
           },
-          "insight_ids": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "maxItems": 300,
-            "minItems": 1,
-            "title": "Insight Ids"
-          },
-          "proof_gaps": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "maxItems": 50,
-            "minItems": 1,
-            "title": "Proof Gaps"
-          },
-          "difficulties": {
+          "goal_node_id": {
             "type": "string",
-            "maxLength": 15000,
-            "minLength": 1,
-            "title": "Difficulties"
+            "title": "Goal Node Id"
           },
-          "next_steps": {
+          "nodes": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/RoadmapNode"
             },
             "type": "array",
-            "maxItems": 30,
+            "maxItems": 100,
+            "minItems": 2,
+            "title": "Nodes"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/RoadmapStep"
+            },
+            "type": "array",
+            "maxItems": 100,
             "minItems": 1,
-            "title": "Next Steps"
+            "title": "Steps"
+          },
+          "missing": {
+            "items": {
+              "$ref": "#/components/schemas/MissingBlock"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Missing"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
+          "id",
           "title",
-          "strategy",
-          "insight_ids",
-          "proof_gaps",
-          "difficulties",
-          "next_steps"
+          "approach",
+          "goal_node_id",
+          "nodes",
+          "steps"
         ],
-        "title": "ResearchPath"
+        "title": "ProofGraph"
       },
       "ResearchPlan": {
         "properties": {
@@ -3097,26 +3883,20 @@
             "type": "string",
             "title": "Problem Id"
           },
-          "title": {
+          "base_hash": {
             "type": "string",
-            "maxLength": 300,
-            "minLength": 1,
-            "title": "Title"
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Base Hash",
+            "description": "The shared guide hash supplied with this task; prevents overwriting another editor"
           },
-          "summary": {
+          "header": {
+            "$ref": "#/components/schemas/GuideHeader"
+          },
+          "body_markdown": {
             "type": "string",
-            "maxLength": 20000,
+            "maxLength": 40000,
             "minLength": 1,
-            "title": "Summary"
-          },
-          "paths": {
-            "items": {
-              "$ref": "#/components/schemas/ResearchPath"
-            },
-            "type": "array",
-            "maxItems": 30,
-            "minItems": 1,
-            "title": "Paths"
+            "title": "Body Markdown"
           }
         },
         "additionalProperties": false,
@@ -3127,11 +3907,12 @@
           "task_id",
           "claim_token",
           "problem_id",
-          "title",
-          "summary",
-          "paths"
+          "base_hash",
+          "header",
+          "body_markdown"
         ],
-        "title": "ResearchPlan"
+        "title": "ResearchPlan",
+        "x-max-document-characters": 40000
       },
       "Review": {
         "properties": {
@@ -3194,6 +3975,31 @@
             ],
             "title": "Supersedes Id"
           },
+          "target_alignment": {
+            "type": "string",
+            "enum": [
+              "aligned",
+              "misaligned",
+              "uncertain",
+              "not_applicable"
+            ],
+            "title": "Target Alignment",
+            "description": "Required for an insight with a registered Lean target: does it faithfully express the mathematical claim?",
+            "default": "not_applicable"
+          },
+          "target_hash": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Hash",
+            "description": "Optional expected immutable target hash; the server records the actual hash with the review"
+          },
           "verdict": {
             "type": "string",
             "enum": [
@@ -3213,9 +4019,9 @@
           "score": {
             "type": "integer",
             "maximum": 5.0,
-            "minimum": 1.0,
+            "minimum": 0.0,
             "title": "Score",
-            "description": "Integer rating from 1 (lowest) to 5 (highest); not a proof certificate"
+            "description": "0 only for non-mathematical or wholly unrelated content: an independent zero review immediately trashes the insight. Otherwise 1–5; not a proof certificate"
           }
         },
         "additionalProperties": false,
@@ -3287,6 +4093,29 @@
       },
       "ReviewItem": {
         "properties": {
+          "target_alignment": {
+            "type": "string",
+            "enum": [
+              "aligned",
+              "misaligned",
+              "uncertain",
+              "not_applicable"
+            ],
+            "title": "Target Alignment",
+            "default": "not_applicable"
+          },
+          "target_hash": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Hash"
+          },
           "insight_id": {
             "type": "string",
             "pattern": "^I[A-Za-z0-9_-]{1,99}$",
@@ -3311,7 +4140,7 @@
           "score": {
             "type": "integer",
             "maximum": 5.0,
-            "minimum": 1.0,
+            "minimum": 0.0,
             "title": "Score"
           }
         },
@@ -3324,6 +4153,94 @@
           "score"
         ],
         "title": "ReviewItem"
+      },
+      "RoadmapNode": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,79}$",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "insight",
+              "lemma",
+              "goal"
+            ],
+            "title": "Kind"
+          },
+          "statement": {
+            "type": "string",
+            "maxLength": 3000,
+            "title": "Statement",
+            "default": ""
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "supported",
+              "conditional",
+              "missing",
+              "target"
+            ],
+            "title": "Status"
+          },
+          "insight_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Insight Ids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "status"
+        ],
+        "title": "RoadmapNode"
+      },
+      "RoadmapStep": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,79}$",
+            "title": "Id"
+          },
+          "requires": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Requires",
+            "description": "All of these premises are needed together; separate steps to the same conclusion are alternatives"
+          },
+          "concludes": {
+            "type": "string",
+            "title": "Concludes"
+          },
+          "explanation": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Explanation"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "requires",
+          "concludes",
+          "explanation"
+        ],
+        "title": "RoadmapStep"
       },
       "Solution": {
         "properties": {

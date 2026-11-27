@@ -24,8 +24,8 @@ def snapshot(tx,pid,scores=None):
         if a['insight_id'] not in insights or a['id'] in scores.withdrawn|scores.superseded:continue
         v=scores.verifications.get(a['verification_id'],{})
         if a.get('library_id')!=LIBRARY_ID:continue
-        if v.get('status')=='passed' and v.get('policy')==POLICY:passed.add(a['insight_id'])
-        if v.get('status') in ('queued','running'):pending.add(a['insight_id'])
+        if a['insight_id'] in scores.verified_insights:passed.add(a['insight_id'])
+        if v.get('status') in ('queued','running') and (a.get('target') or {}).get('target_hash')==getattr(scores,'targets',{}).get(a['insight_id'],{}).get('target_hash') and a.get('target'):pending.add(a['insight_id'])
     review_reserved=set();lean_reserved=set()
     for t in tx.all('tasks'):
         if t['problem_id']!=pid or not live(t):continue
@@ -48,6 +48,9 @@ def snapshot(tx,pid,scores=None):
 
 
 def sync_schedule(tx,problem_id=None):
+    from apps.api.modules.migration import sync
+    migration=sync(tx,problem_id)
+    if migration is not None:return migration
     sync_candidates(tx)
     ensure_exploration(tx,problem_id)
     scores=Scores(tx);depths=dependency_depths(scores);priority=priority_targets(tx)
@@ -74,7 +77,7 @@ def sync_schedule(tx,problem_id=None):
         if not state['review_room']:
             for t in review_available:
                 t.update(status='closed',closed_reason='Review target already covered by completed or reserved reviews');tx.put('tasks',t)
-        pool=[i for i in insights.values() if i['id'] not in passed|pending|reserved and i['id'] not in priority]
+        pool=[i for i in insights.values() if i['id'] not in passed|pending|reserved and i['id'] not in priority and getattr(scores,'targets',{}).get(i['id'],{}).get('status')=='valid']
         pool.sort(key=lambda i:(-depths.get(i['id'],0),)+ranking(tx,scores,'task_claims',i))
         selected={i['id'] for i in pool[:state['lean_room']]} if state['lean_refill'] else set()
         for t in tasks:
@@ -93,6 +96,9 @@ def sync_schedule(tx,problem_id=None):
 
 def dispatch_priority(tx,t,states,priority,automatic=True,cache=None):
     """None means no useful capacity; lower integer wins."""
+    from apps.api.modules.migration import active
+    if active(tx):return -10 if t['type']=='lean_target' and available(t) else None
+    if t['type']=='lean_target':return None
     state=states.get(t['problem_id'])
     if not state or not available(t):return None
     if t['type']=='research_synthesis':
@@ -105,6 +111,8 @@ def dispatch_priority(tx,t,states,priority,automatic=True,cache=None):
         if t['problem_id'] not in cache:
             snap=snapshot(tx,t['problem_id']);cache[t['problem_id']]=(snap[3],snap[4])
         passed,pending=cache[t['problem_id']]
+        target=tx.get('insight_targets',ident) if ident else None
+        if t.get('mode')!='audit' and (not target or target.get('status')!='valid'):return None
         if ident in passed and t.get('mode')!='audit':return None
         if ident in priority:
             return None if ident in pending and t.get('mode')!='audit' else 0

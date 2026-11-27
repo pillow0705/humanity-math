@@ -61,7 +61,8 @@ def sync_candidates(tx):
         if t['type']=='lean_work' and t.get('mode')=='formalize' and t['status']=='available' and t.get('target_id') in required and verified.get(t['target_id']):
             t.update(status='closed',closed_reason='Verified Lean already available');tx.put('tasks',t)
     def ensure_work(ident,artifact=None,solution=None):
-        if withdrawn(tx,'insights',ident): return
+        target=tx.get('insight_targets',ident)
+        if withdrawn(tx,'insights',ident) or not target or target.get('status')!='valid': return
         if ident in pending: return
         existing=next((t for t in tasks if t['type']=='lean_work' and t.get('target_id')==ident and t.get('mode') in ('formalize','repair') and t['status'] in ('available','claimed')),None)
         if existing:
@@ -84,37 +85,36 @@ def sync_candidates(tx):
         claim=candidate['claims_problem_solved']
         state=dict(id=ident,insight_id=ident,problem_id=p['id'],claims_problem_solved=claim,verification_target=final_target(p,claim),required_insight_ids=sorted(depths),
                    missing_insight_ids=sorted(i for i in depths if not verified.get(i)),
+                   missing_target_ids=sorted(i for i in depths if not tx.get('insight_targets',i) or tx.get('insight_targets',i).get('status')!='valid'),
                    target_ready=bool(p.get('lean_target') and p.get('target_status')=='reviewed'))
         if p['status']=='formal_proof_verified':
             state.update(status='problem_closed',solution_id=p.get('solution_id'))
         else:
             for missing in state['missing_insight_ids']: ensure_work(missing)
-            if state['missing_insight_ids']: state['status']='awaiting_lean'
+            if state['missing_target_ids']: state['status']='awaiting_insight_targets'
+            elif state['missing_insight_ids']: state['status']='awaiting_lean'
             else:
-                selected=None
-                for a in sorted(verified.get(ident,[]),key=lambda x:x['created_at'],reverse=True):
-                    chain=closure(tx,a)
-                    if set(depths)<={x['insight_id'] for x in chain} and all(verifications.get(x['verification_id'],{}).get('status')=='passed' and x.get('library_id')==LIBRARY_ID for x in chain):
-                        selected=a;break
-                if not selected:
-                    state['status']='awaiting_dependency_links'
-                    ensure_work(ident,max(verified[ident],key=lambda x:x['created_at']))
-                else:
-                    for t in tasks:
-                        if t['type']=='lean_work' and t.get('target_id')==ident and t.get('mode')=='repair' and t['status']=='available' and t.get('repair_artifact_id')!=selected['id']:
-                            t.update(status='closed',closed_reason='Newer complete Lean chain available');tx.put('tasks',t)
-                    if not state['target_ready']:
-                        state.update(status='awaiting_reviewed_target',artifact_id=selected['id'])
-                        if tx.get('proof_candidates',ident)!=state: tx.put('proof_candidates',state)
-                        continue
-                    target_hash=digest(final_target(p,claim))
-                    matching=[s for s in tx.all('solutions') if s['artifact_id']==selected['id'] and s.get('target_hash')==target_hash and s.get('claims_problem_solved',1)==claim and (s['status']!='cancelled' or withdrawn(tx,'solutions',s['id']))]
-                    solution=max(matching,key=lambda s:s['created_at']) if matching else tx.new('solutions','S',dict(
-                        insight_id=ident,artifact_id=selected['id'],problem_id=p['id'],status='queued',automatic=True,claims_problem_solved=claim,
-                        target_hash=target_hash,contributor_id=selected['contributor_id'],contributor_name=selected.get('contributor_name'),
-                        proof=candidate['proof']))
-                    state.update(status='final_'+solution['status'],artifact_id=selected['id'],solution_id=solution['id'])
-                    if solution['status']=='failed': ensure_work(ident,selected,solution)
+                selected=verified[ident][0]
+                # All textual prerequisites have canonical proofs. Assemble those
+                # modules for the final check without re-proving an already fixed
+                # target merely to add redundant imports to its source.
+                support_ids=sorted({verified[i][0]['id'] for i in depths if i!=ident})
+                for t in tasks:
+                    if t['type']=='lean_work' and t.get('target_id')==ident and t.get('mode') in ('formalize','repair') and t['status']=='available':
+                        t.update(status='closed',closed_reason='The immutable Insight target already has its verified proof');tx.put('tasks',t)
+                if not state['target_ready']:
+                    state.update(status='awaiting_reviewed_target',artifact_id=selected['id'])
+                    if tx.get('proof_candidates',ident)!=state: tx.put('proof_candidates',state)
+                    continue
+                target_hash=digest(final_target(p,claim))
+                matching=[s for s in tx.all('solutions') if s['artifact_id']==selected['id'] and s.get('target_hash')==target_hash and s.get('claims_problem_solved',1)==claim and s.get('supporting_artifact_ids',[])==support_ids and (s['status']!='cancelled' or withdrawn(tx,'solutions',s['id']))]
+                solution=max(matching,key=lambda s:s['created_at']) if matching else tx.new('solutions','S',dict(
+                    insight_id=ident,artifact_id=selected['id'],supporting_artifact_ids=support_ids,problem_id=p['id'],status='queued',automatic=True,claims_problem_solved=claim,
+                    target_hash=target_hash,contributor_id=selected['contributor_id'],contributor_name=selected.get('contributor_name'),
+                    proof=candidate['proof']))
+                state.update(status='final_'+solution['status'],artifact_id=selected['id'],solution_id=solution['id'])
+                if solution['status']=='failed':
+                    state['next_action']='Inspect final-check diagnostics. If the fixed Insight target does not prove the original problem, submit a corrected superseding Insight; an already verified target is not re-proved for additional credit.'
         if tx.get('proof_candidates',ident)!=state: tx.put('proof_candidates',state)
     for current in tx.all('proof_candidates'):
         if withdrawn(tx,'insights',current['insight_id']) and current['status']!='withdrawn':

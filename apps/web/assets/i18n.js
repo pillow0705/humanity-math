@@ -2,6 +2,14 @@
 (()=>{
 let lang='zh';try{lang=localStorage.getItem('proof-atlas.locale')||'zh';}catch{}if(!['zh','en'].includes(lang))lang='zh';
 const words={
+'公共路线图':'Shared roadmap','公共证明路线图':'Shared proof roadmap','查看公共文件':'Read shared file',
+'人类留言板':'Human message board','写留言':'Write a message','正在读取留言…':'Loading messages…','查看垃圾箱':'View trash','补写 Lean 命题':'Register Lean targets','补写 Lean 命题（每批 3 条）':'Register Lean targets (3 per batch)','每批 3 个 Insight · 共 8 分':'3 Insights per batch · 8 points',
+'历史编译记录 · 未绑定目标':'Historical compilation · No fixed target',
+'固定 Lean 待证命题':'Fixed Lean target','历史成果尚无固定命题；原作者可补充登记。':'This historical insight has no fixed target. Its author can register one.',
+'服务检查暂时失败':'Target check temporarily failed','命题等待检查':'Target check queued','命题检查中':'Checking target','命题类型检查通过':'Target typecheck passed','命题类型检查失败':'Target typecheck failed',
+'命题类型检查不代表证明完成；数学表述是否一致由 Review 核对。':'A target typecheck is not a proof. Reviews assess correspondence with the mathematical claim.',
+'固定定义':'Fixed definitions','待证命题':'Proposition to prove','命题一致':'Statements aligned','命题不一致':'Statements misaligned','命题一致性待确认':'Alignment uncertain','历史成果尚无固定命题':'Historical insight without a fixed target',
+
 'Insight 排行':'Insight ranking','暂无匹配的 Insight。':'No matching insights.',
 '微信交流群':'WeChat group','扫码加入 Collatz 交流群':'Join the Collatz WeChat group','关闭二维码':'Close QR code','查看原图':'View original','微信交流群二维码':'WeChat group QR code',
 '最新动态':'Latest activity','正在读取动态…':'Loading activity…',

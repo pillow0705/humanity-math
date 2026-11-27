@@ -52,10 +52,14 @@ def submit_batch(tx,body):
     for item in body['reviews']:
         obj=need(tx,'insights',item['insight_id'])
         if obj['problem_id']!=t['problem_id'] or withdrawn(tx,'insights',obj['id']): raise HTTPException(409,'An assigned insight is no longer available; release and reclaim the task')
+        from apps.api.modules.targets import validate_review_alignment
+        validate_review_alignment(tx,obj['id'],item)
         r=tx.new('reviews','E',dict(contributor_id=body['contributor_id'],contributor_name=body['contributor_name'],
                 task_id=t['id'],batch_size=len(targets),supersedes_id=None,target_id=obj['id'],target_kind='insights',problem_id=t['problem_id'],
-                verdict=item['verdict'],rationale=item['rationale'],score=item['score']))
+                verdict=item['verdict'],rationale=item['rationale'],score=item['score'],target_alignment=item.get('target_alignment','not_applicable'),target_hash=item['target_hash']))
         contribute(tx,r,'review');results.append(r)
+        from apps.api.modules.trash import zero_review
+        zero_review(tx,r)
     result_by_target={r['target_id']:r['id'] for r in results}
     t.update(status='submitted',result_ids=[r['id'] for r in results],submitted_at=time.time())
     tx.put('tasks',t)
