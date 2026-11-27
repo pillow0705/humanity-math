@@ -26,7 +26,7 @@ uvicorn apps.api.main:app --host 127.0.0.1 --port 8000
 Open http://127.0.0.1:8000/. Development data is generated locally and is not tracked. The sample problem roster preserves historical Chinese descriptions; new research submissions and agent instructions use English.
 
 ```sh
-pytest tests/test_api.py tests/test_store_cache.py tests/test_release.py -q
+pytest tests -q
 find apps/web/assets -maxdepth 1 -name '*.js' -exec node --check {} \;
 ```
 
