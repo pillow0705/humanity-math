@@ -25,7 +25,7 @@ def test_package_and_submission(client):
     assert claim['research_package']['prompt']['text']
     assert claim['research_package']['submission']['schema']['required']
     assert all(x['id'].startswith('I') for x in claim['research_package']['materials'])
-    assert len(claim['research_package']['insight_catalog']['items'])<=300
+    assert len(claim['research_package']['insight_catalog']['items'])<=100
     body=dict(insight(),task_id=claim['task']['id'],claim_token=claim['claim_token'])
     result=client.post('/api/v1/insights',json=body,headers={'Idempotency-Key':'one'})
     assert result.status_code==200,result.text
@@ -221,7 +221,7 @@ def test_fair_recommendations_and_low_scores(client,monkeypatch):
     assert counts[low['id']]<sum(v for k,v in counts.items() if k!=low['id'])/399
     claimed=client.post('/api/v1/tasks/claim',json=dict(contributor_id='2',contributor_name='Aster',type='insight_explore')).json()
     catalog=claimed['research_package']['insight_catalog']
-    assert len(catalog['items'])==300 and all(x['detail_url'] for x in catalog['items'])
+    assert len(catalog['items'])==100 and all(x['detail_url'] for x in catalog['items'])
 
 
 def test_frontend_entry_and_four_task_contract(client):
@@ -1152,3 +1152,59 @@ def test_frontend_release_assets_and_wechat_contact(client,monkeypatch):
     assert client.get('/assets/wechat-collatz.jpg').status_code==200
     monkeypatch.setenv('APP_RELEASE','b'*40)
     assert first!=client.get('/').text
+
+
+@pytest.mark.parametrize('count',[99,100,101])
+def test_exploration_catalog_boundary(client,count):
+    with main.store.transaction() as tx:
+        for index in range(count):tx.new('insights','I',dict(insight(),title=f'Catalog {index}'))
+    claimed=dispatch_claim(client,type='insight_explore')
+    catalog=claimed['research_package']['insight_catalog']
+    assert len(catalog['items'])==min(count,100)
+    assert len({x['id'] for x in catalog['items']})==min(count,100)
+    assert catalog['policy']['sample_size']==100
+    assert catalog['total_available']==count
+    assert 'Actively search the platform' in claimed['research_package']['prompt']['text']
+
+
+def test_synthesis_retains_all_insights_and_public_catalog_keeps_default(client):
+    with main.store.transaction() as tx:
+        for index in range(125):tx.new('insights','I',dict(insight(),title=f'Full catalog {index}'))
+    synthesis=dispatch_claim(client,type='research_synthesis')['research_package']
+    assert len(synthesis['synthesis_catalog'])==125
+    assert len(client.get('/api/v1/problems/P001/recommendations').json()['items'])==125
+    explore=dispatch_claim(client,'3','Bob',type='insight_explore')['research_package']
+    assert len(explore['insight_catalog']['items'])==100
+
+
+def test_insight_ranking_scores_search_and_pagination(client):
+    first=client.post('/api/v1/insights',json=dict(insight(),title='Referenced result')).json()
+    second=client.post('/api/v1/insights',json=dict(insight(),title='Reviewed result')).json()
+    third=client.post('/api/v1/insights',json=dict(insight(),title='Citing result',references=[first['id']])).json()
+    assert client.post('/api/v1/insights/'+second['id']+'/reviews',json=dict(contributor_id='4',contributor_name='Beta',verdict='support',rationale='Checked the proof',score=5)).status_code==200
+    data=client.get('/api/v1/insights/ranking?problem_id=P001&limit=2').json()
+    assert data['total']==3
+    assert [x['id'] for x in data['items']]==[first['id'],second['id']]
+    assert [x['evaluation']['contribution_points'] for x in data['items']]==[11,10.5]
+    last=client.get('/api/v1/insights/ranking?problem_id=P001&offset=2').json()['items'][0]
+    assert last['id']==third['id'] and last['rank']==3
+    search=client.get('/api/v1/insights/ranking',params=dict(problem_id='P001',q='Citing')).json()
+    assert search['items'][0]['rank']==3 and search['total']==1
+    assert all('proof' not in x and 'contributor_id' not in x for x in data['items'])
+    assert client.get('/api/v1/insights/ranking?problem_id=UNKNOWN').status_code==404
+    assert client.get('/api/v1/insights/ranking?limit=101').status_code==422
+
+
+def test_insight_ranking_excludes_replaced_withdrawn_and_includes_lean_bonus(client):
+    old=client.post('/api/v1/insights',json=insight()).json()
+    replacement=client.post('/api/v1/insights',json=dict(insight(),title='Updated result',supersedes_id=old['id'])).json()
+    hidden=client.post('/api/v1/insights',json=dict(insight(),title='Withdrawn result')).json()
+    assert client.post('/api/v1/contributors/1/submissions/insights/'+hidden['id']+'/withdraw',json=dict(contributor_id='1',contributor_name='Alice')).status_code==200
+    with main.store.transaction() as tx:
+        tx.put('lean_artifacts',dict(id='L-ranking',insight_id=replacement['id'],verification_id='V-ranking',contributor_id='2',created_at=1))
+        tx.put('verifications',dict(id='V-ranking',artifact_id='L-ranking',status='passed',created_at=1))
+    data=client.get('/api/v1/insights/ranking?problem_id=P001').json()
+    assert data['total']==1 and data['items'][0]['id']==replacement['id']
+    assert data['items'][0]['evaluation']['contribution_points']==20
+    html=client.get('/').text
+    assert 'data-tab="insight-ranking"' in html and 'id="tab-insight-ranking"' in html

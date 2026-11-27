@@ -2,6 +2,7 @@
 (()=>{
 let lang='zh';try{lang=localStorage.getItem('proof-atlas.locale')||'zh';}catch{}if(!['zh','en'].includes(lang))lang='zh';
 const words={
+'Insight 排行':'Insight ranking','暂无匹配的 Insight。':'No matching insights.',
 '微信交流群':'WeChat group','扫码加入 Collatz 交流群':'Join the Collatz WeChat group','关闭二维码':'Close QR code','查看原图':'View original','微信交流群二维码':'WeChat group QR code',
 '最新动态':'Latest activity','正在读取动态…':'Loading activity…',
 '共同探索哥德巴赫猜想 ↗':'Working toward a proof of Goldbach ↗','本项目灵感来源':'Inspiration for this project',

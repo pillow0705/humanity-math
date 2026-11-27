@@ -8,7 +8,7 @@ from apps.api.models import Insight, Review, ReviewBatch, Claim, Lease, Artifact
 from apps.api.modules.core import need, find_content, public_task, create_content, clean, finish_task, contribute, check_supersedes, supported_task
 from apps.api.modules.lean import create_artifact, closure, environment, artifact_summary, MATHLIB_REVISION, bundle_manifest
 
-from apps.api.modules.recommendations import recommend, sort_tasks, note as note_exposure
+from apps.api.modules.recommendations import recommend, sort_tasks, note as note_exposure, CATALOG_SIZE, EXPLORATION_CATALOG_SIZE
 from apps.api.modules.contributors import claim_name, validate_identity
 from apps.api.modules.credentials import issue as issue_credential, verify as verify_credential, public_person
 from apps.api.modules.scoring import Scores, policy as scoring_policy
@@ -116,7 +116,8 @@ def research_package(tx,t):
     plans=active_plans(tx,problem['id'])
     guidance=dict(latest=plans[-1] if plans else None,detail_url=PREFIX+'/api/v1/problems/'+problem['id']+'/research-guidance')
     synthesis_catalog=catalog(tx,problem['id'],PREFIX) if t['type']=='research_synthesis' else None
-    return dict(research_guidance=guidance,synthesis_catalog=synthesis_catalog,collaboration_language='en',submission_language='en',historical_content_policy='Historical research remains in its original language. Submit all new explanatory prose in English; preserve mathematical notation, identifiers and original source titles.',research_policy=research_policy(problem),research_direction=t.get('research_direction'),completion_context=candidate_context,final_check_context=final_check,insight_catalog=recommend(tx,problem['id'],PREFIX,surface='task_packages'),review_targets=[dict(insight_id=i,detail_url=PREFIX+'/api/v1/insights/'+i) for i in t.get('target_ids',[])],alternative_submission=alternative,repair_context=repair,problem=problem,goal=t.get('goal') or f"{t['type']} for {t.get('target_id') or problem['id']}",materials=materials,reviews=reviews,lean_environment=environment(PREFIX),lean_artifacts=code,prompt=prompt_for(t),submission=dict(method='POST',url=PREFIX+'/api/v1'+endpoint,schema=submission_schema,include_fields=['contributor_id','contributor_name','contributor_password','task_id','claim_token']))
+    insight_catalog=recommend(tx,problem['id'],PREFIX,surface='task_packages',sample_size=EXPLORATION_CATALOG_SIZE if t['type']=='insight_explore' else CATALOG_SIZE)
+    return dict(research_guidance=guidance,synthesis_catalog=synthesis_catalog,collaboration_language='en',submission_language='en',historical_content_policy='Historical research remains in its original language. Submit all new explanatory prose in English; preserve mathematical notation, identifiers and original source titles.',research_policy=research_policy(problem),research_direction=t.get('research_direction'),completion_context=candidate_context,final_check_context=final_check,insight_catalog=insight_catalog,review_targets=[dict(insight_id=i,detail_url=PREFIX+'/api/v1/insights/'+i) for i in t.get('target_ids',[])],alternative_submission=alternative,repair_context=repair,problem=problem,goal=t.get('goal') or f"{t['type']} for {t.get('target_id') or problem['id']}",materials=materials,reviews=reviews,lean_environment=environment(PREFIX),lean_artifacts=code,prompt=prompt_for(t),submission=dict(method='POST',url=PREFIX+'/api/v1'+endpoint,schema=submission_schema,include_fields=['contributor_id','contributor_name','contributor_password','task_id','claim_token']))
 
 @app.get('/',response_class=HTMLResponse)
 def homepage():
@@ -372,6 +373,18 @@ def list_content(kind,problem_id,q,offset,limit,include_withdrawn=False):
 
 @app.get('/api/v1/insights')
 def insights(problem_id:str|None=None,q:str='',offset:int=Query(0,ge=0),limit:int=Query(30,ge=1,le=100),include_withdrawn:bool=False): return list_content('insights',problem_id,q,offset,limit,include_withdrawn)
+
+@app.get('/api/v1/insights/ranking')
+def insight_ranking(problem_id:str|None=None,q:str='',offset:int=Query(0,ge=0),limit:int=Query(10,ge=1,le=100)):
+    """Rank active insights by their current individual contribution points."""
+    with store.transaction() as tx:
+        if problem_id: need(tx,'problems',problem_id)
+        active={p['id'] for p in tx.all('problems') if p['status']!='archived'}
+        scores=Scores(tx)
+        items=[x for x in scores.objects['insights'].values() if (x['problem_id']==problem_id if problem_id else x['problem_id'] in active) and x['id'] not in scores.withdrawn and x['id'] not in scores.superseded]
+        items.sort(key=lambda x:(-scores.evaluation(x,'insights')['contribution_points'],x['created_at'],x['id']))
+        ranked_items=[dict(id=x['id'],problem_id=x['problem_id'],title=x['title'],contributor_name=x.get('contributor_name',''),seed=x.get('seed',False),rank=rank,evaluation=scores.evaluation(x,'insights')) for rank,x in enumerate(items,1) if not q or q.lower() in json.dumps(x,ensure_ascii=False).lower()]
+        return page(ranked_items,offset,limit)
 
 def content(kind,id):
     with store.transaction() as tx:
