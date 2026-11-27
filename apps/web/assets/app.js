@@ -240,8 +240,8 @@ function evaluationHTML(e){if(!e)return '';return '<div class="detail-section"><
 const targetAlignmentNames={aligned:'命题一致',misaligned:'命题不一致',uncertain:'命题一致性待确认',not_applicable:'历史成果尚无固定命题'};
 function targetHTML(target){
  if(!target)return '<div class="detail-section"><h3>固定 Lean 待证命题</h3><p>历史成果尚无固定命题；原作者可补充登记。</p></div>';
- const names={queued:'命题等待检查',checking:'命题检查中',valid:'命题类型检查通过',invalid:'命题类型检查失败'};
- return '<div class="detail-section"><h3>固定 Lean 待证命题</h3><p><span class="pill">'+esc(names[target.status]||target.status)+'</span></p><p>命题类型检查不代表证明完成；数学表述是否一致由 Review 核对。</p>'+(target.definitions?'<h4>固定定义</h4><pre>'+esc(target.definitions)+'</pre>':'')+'<h4>待证命题</h4><pre>'+esc(target.expression)+'</pre>'+(target.target_hash?'<p class="result-id">'+esc(target.target_hash)+'</p>':'')+(target.dependencies?.length?'<p>依赖：</p>'+referenceButtons(target.dependencies):'')+(target.status==='invalid'&&target.log?'<pre>'+esc(target.log)+'</pre>':'')+'</div>';
+ const names={queued:'命题等待检查',checking:'命题检查中',valid:'命题类型检查通过',invalid:'命题类型检查失败',error:'服务检查暂时失败'};
+ return '<div class="detail-section"><h3>固定 Lean 待证命题</h3><p><span class="pill">'+esc(names[target.status]||target.status)+'</span></p><p>命题类型检查不代表证明完成；数学表述是否一致由 Review 核对。</p>'+(target.definitions?'<h4>固定定义</h4><pre>'+esc(target.definitions)+'</pre>':'')+'<h4>待证命题</h4><pre>'+esc(target.expression)+'</pre>'+(target.target_hash?'<p class="result-id">'+esc(target.target_hash)+'</p>':'')+(target.dependencies?.length?'<p>依赖：</p>'+referenceButtons(target.dependencies):'')+(['invalid','error'].includes(target.status)&&target.log?'<pre>'+esc(target.log)+'</pre>':'')+'</div>';
 }
 function artifactStatus(x){const v=x.verification||{};return x.interface?.status||(v.status==='passed'&&!v.target_matched?'legacy_unbound':v.status);}
 function referenceButtons(ids){return '<div class="references">'+ids.map(id=>'<button class="button" data-ref="'+esc(id)+'">'+esc(shortId(id))+'</button>').join('')+'</div>';}

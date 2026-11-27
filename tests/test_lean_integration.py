@@ -135,7 +135,8 @@ def test_mathlib_real_proof_reuse_and_target(tmp_path,monkeypatch):
 
 @pytest.mark.skipif(os.environ.get('RUN_LEAN_TESTS')!='1',reason='Requires pinned verifier')
 @pytest.mark.parametrize('target',['True','False',None])
-def test_automatic_candidate_completion(tmp_path,monkeypatch,target):
+@pytest.mark.parametrize('uses_support',[True,False])
+def test_automatic_candidate_completion(tmp_path,monkeypatch,target,uses_support):
     s=Store(tmp_path);(tmp_path/'artifacts').mkdir()
     monkeypatch.setattr(main,'store',s);monkeypatch.setattr(worker,'STORE',s);monkeypatch.setattr(worker,'CACHE',tmp_path/'artifacts/cache')
     with s.transaction() as tx:
@@ -154,16 +155,10 @@ def test_automatic_candidate_completion(tmp_path,monkeypatch,target):
         assert c.get('/api/v1/lean/verifications/'+a['verification_id']).json()['status']=='passed'
         return a
     a=submit(dep,'theorem prerequisite : True := True.intro','prerequisite')
-    # A separate correct proof does not satisfy the declared dependency-chain contract.
-    disconnected=submit(candidate,'theorem disconnected : True := True.intro','disconnected')
-    state=c.get('/api/v1/insights/'+candidate['id']).json()['completion']
-    assert state['status']=='awaiting_dependency_links'
-    # An operator must invalidate a semantically incomplete proof before replacement.
+    # Textual references need canonical supporting proofs, but the fixed leaf need not import an unused lemma.
+    b=submit(candidate,'theorem final_proof : True := '+('prerequisite' if uses_support else 'True.intro'),'final_proof',[a['id']] if uses_support else [])
     denied=c.post('/api/v1/lean/artifacts',json=dict(identity,insight_id=candidate['id'],source='theorem duplicate : True := True.intro',theorem='duplicate'))
     assert denied.status_code==409
-    with s.transaction() as tx:
-        v=tx.get('verifications',disconnected['verification_id']);v.update(status='failed',log='Operator rejected the disconnected proof');tx.put('verifications',v)
-    b=submit(candidate,'theorem final_proof : True := prerequisite','final_proof',[a['id']])
     before=(worker.CACHE/a['content_hash']/'module.olean').stat().st_mtime_ns
     if target is None:
         assert not worker.once()
@@ -182,7 +177,8 @@ def test_automatic_candidate_completion(tmp_path,monkeypatch,target):
         assert not worker.once()  # Failed final checks do not loop forever.
     else:
         assert result['status']=='verified' and result['automatic']
-        assert set(result['used_insight_ids'])=={dep['id'],candidate['id']}
+        assert set(result['used_insight_ids'])==({dep['id'],candidate['id']} if uses_support else {candidate['id']})
+        assert a['id'] in result['supporting_artifact_ids']
         assert c.get('/api/v1/problems/PCAND').json()['status']=='formal_proof_verified'
         assert not c.get('/api/v1/tasks?status=available').json()['items']
         assert c.post('/api/v1/tasks/claim',json=identity).status_code==409

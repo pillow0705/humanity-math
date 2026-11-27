@@ -432,6 +432,23 @@ def register_insight_lean_target(id:str,body:LeanTargetRegistration,request:Requ
         return register_target(tx,obj,b['lean_target'])
     return submit(request,b,op)
 
+@app.post('/api/v1/insights/{id}/lean-target/recheck')
+def recheck_insight_lean_target(id:str,body:ContributorAction,request:Request):
+    b=body.model_dump()
+    def op(tx):
+        obj=need(tx,'insights',id)
+        if obj['contributor_id']!=b['contributor_id']:
+            raise HTTPException(403,'Only the insight author may recheck its Lean target')
+        target=need(tx,'insight_targets',id)
+        if target['status']!='error':
+            raise HTTPException(409,'Only a Lean target with an infrastructure error may be rechecked; invalid statements require a superseding insight')
+        target.update(status='queued',requeued_at=time.time(),recheck_reason=b.get('reason',''),last_error=target.get('log',''))
+        for field in ('started_at','finished_at','log','exit_code'):
+            target.pop(field,None)
+        tx.put('insight_targets',target)
+        return target
+    return submit(request,b,op)
+
 @app.get('/api/v1/insights/{id}/dependencies')
 def insight_deps(id:str): return dependencies('insights',id)
 

@@ -8,7 +8,7 @@ from apps.api.modules.core import need, task
 from apps.api.modules.completion import sync_candidates, priority_targets, close_problem
 from apps.api.modules.lifecycle import withdrawn
 from apps.api.modules.research import final_target
-from apps.api.modules.targets import target_source
+from apps.api.modules.targets import target_source, target_proof_matches
 
 ROOT=Path(__file__).resolve().parents[2]
 STORE=Store()
@@ -98,13 +98,13 @@ def verify_target(target,arts):
         path=work/relative;path.parent.mkdir(parents=True,exist_ok=True);os.chmod(path.parent,0o777)
         source=target_source(target);path.write_text(source)
         code,log,image=sandbox(work,['/opt/lean/bin/lean','-j','1','-o',relative.replace('.lean','.olean'),relative],True)
-        if code: return dict(status='invalid',log=log,exit_code=code)
+        if code: return dict(status='error' if code in (124,125,126,127,137,139) else 'invalid',log=log,exit_code=code)
         checker=('import Lean\nimport '+target['target_module']+'\n'
                  +'run_cmd do\n  let info ← Lean.getConstInfo `'+target['target_constant']+'\n  unless info.levelParams.isEmpty do throwError \"Fixed Insight target must be closed over universe levels\"\n'
                  +'def MCVerifiedResult : Prop := @_root_.'+target['target_constant']+'\n#print axioms MCVerifiedResult\n')
         (work/'Check.lean').write_text(checker)
         code,checklog,_=sandbox(work,['/opt/lean/bin/lean','-j','1','Check.lean'])
-        if code: return dict(status='invalid',log=log+'\n'+checklog,exit_code=code)
+        if code: return dict(status='error' if code in (124,125,126,127,137,139) else 'invalid',log=log+'\n'+checklog,exit_code=code)
         axioms=parse_axioms(checklog)
         cached=target_cache_files(target);cached.mkdir(parents=True,exist_ok=True)
         shutil.copyfile(path.with_suffix('.olean'),cached/'module.olean')
@@ -182,7 +182,7 @@ def check_next_target():
                 if artifact['content_hash']!=snapshot['content_hash']:raise RuntimeError('Fixed target dependency changed')
                 for a in closure(tx,artifact):arts[a['id']]=a
         result=verify_target(target,list(arts.values()))
-    except Exception as exc:result=dict(status='invalid',log=str(exc)[-10000:])
+    except Exception as exc:result=dict(status='error',log=str(exc)[-10000:])
     with STORE.transaction() as tx:
         current=need(tx,'insight_targets',target['id'])
         if current['target_hash']!=target['target_hash']:raise RuntimeError('Immutable Insight target changed during checking')
@@ -196,7 +196,13 @@ def once():
         candidates=[x for x in tx.all('solutions') if x['status']=='queued']
         if candidates:
             v=min(candidates,key=lambda x:x['created_at']); v.update(status='running',started_at=time.time()); tx.put('solutions',v)
-            a=need(tx,'lean_artifacts',v['artifact_id']); arts=closure(tx,a); p=need(tx,'problems',v['problem_id']); kind='solution'
+            a=need(tx,'lean_artifacts',v['artifact_id'])
+            merged={}
+            for supporting_id in v.get('supporting_artifact_ids',[]):
+                for artifact in closure(tx,need(tx,'lean_artifacts',supporting_id)):merged.setdefault(artifact['id'],artifact)
+            for artifact in closure(tx,a):merged.setdefault(artifact['id'],artifact)
+            arts=list(merged.values());p=need(tx,'problems',v['problem_id']);kind='solution'
+            leaf_verified=target_proof_matches(a,need(tx,'verifications',a['verification_id']),tx.get('insight_targets',a['insight_id'])) and not withdrawn(tx,'lean_artifacts',a['id'])
         else:
             candidates=[x for x in tx.all('verifications') if x['status']=='queued']
             from apps.api.modules.lean import canonical_proof_ids
@@ -206,7 +212,7 @@ def once():
                 if pending_artifact['insight_id'] in canonical:
                     pending.update(status='cancelled',finished_at=time.time(),log='Duplicate formalization: this insight already has a canonical verified proof.')
                     tx.put('verifications',pending)
-            candidates=[x for x in candidates if x['status']=='queued']
+            candidates=[x for x in candidates if x['status']=='queued' and (tx.get('insight_targets',need(tx,'lean_artifacts',x['artifact_id'])['insight_id']) or {}).get('status') not in ('queued','checking','error')]
             if not candidates: return False
             priorities=priority_targets(tx)
             def order(v):
@@ -215,6 +221,7 @@ def once():
             v=min(candidates,key=order); v.update(status='running',started_at=time.time()); tx.put('verifications',v)
             a=need(tx,'lean_artifacts',v['artifact_id']); arts=closure(tx,a); target=tx.get('insight_targets',a['insight_id']); kind='verification'
     try:
+        if kind=='solution' and not leaf_verified:raise RuntimeError('Final verification requires a proof of the immutable Insight target')
         if kind=='solution' and (p.get('status')=='archived' or p.get('target_status')!='reviewed' or digest(final_target(p,v.get('claims_problem_solved',1)))!=v.get('target_hash')): raise RuntimeError('Final verification requires the unchanged reviewed target')
         if kind=='verification' and (not target or target.get('status')!='valid' or target.get('target_hash')!=a.get('target_hash')): raise RuntimeError('The immutable Insight target must be valid and match this proof snapshot')
         result=verify_artifact(a,arts) if kind=='verification' else verify_solution(v,p,a,arts)
@@ -226,7 +233,9 @@ def once():
             sync_candidates(tx);return True
         if kind=='solution' and result['status']=='verified':
             current_problem=need(tx,'problems',v['problem_id'])
-            if current_problem.get('status')=='archived' or current_problem.get('target_status')!='reviewed' or digest(final_target(current_problem,v.get('claims_problem_solved',1)))!=v['target_hash']:
+            current_leaf=need(tx,'lean_artifacts',a['id'])
+            current_leaf_valid=target_proof_matches(current_leaf,need(tx,'verifications',current_leaf['verification_id']),tx.get('insight_targets',current_leaf['insight_id'])) and not withdrawn(tx,'lean_artifacts',a['id'])
+            if not current_leaf_valid or current_problem.get('status')=='archived' or current_problem.get('target_status')!='reviewed' or digest(final_target(current_problem,v.get('claims_problem_solved',1)))!=v['target_hash']:
                 result=dict(status='failed',log='Reviewed target changed during verification')
         if kind=='verification' and result['status']=='passed':
             current_target=tx.get('insight_targets',a['insight_id'])

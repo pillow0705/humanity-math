@@ -206,3 +206,38 @@ def test_only_first_exact_target_proof_earns_credit_and_legacy_probes_do_not(tar
         assert scores.total('2')['score']==0
         assert scores.evaluation(insight,'insights')['lean_bonus']==0
         assert canonical_proof_ids(tx)=={}
+
+
+def test_target_infrastructure_error_recheck_is_owner_only_and_preserves_target(target_client):
+    client=target_client
+    insight=client.post('/api/v1/insights',json=body()).json()
+    with main.store.transaction() as tx:
+        before=get_target(tx,insight['id'])
+        before.update(status='error',log='Compiler timeout',started_at=10,finished_at=20,exit_code=124)
+        tx.put('insight_targets',before)
+        events_before=tx.all('contributions');tasks_before=tx.all('tasks')
+    url='/api/v1/insights/'+insight['id']+'/lean-target/recheck'
+    assert client.post(url,json=dict(contributor_id='2',contributor_name='Bob')).status_code==403
+    result=client.post(url,json=dict(contributor_id='1',contributor_name='Alice',reason='Retry after restoring the verifier'))
+    assert result.status_code==200,result.text
+    after=result.json()
+    assert after['status']=='queued'
+    for field in ('target_hash','expression','definitions','dependencies','dependency_snapshot','target_module','target_constant','target_format','created_at'):
+        assert after[field]==before[field]
+    assert after['last_error']=='Compiler timeout'
+    assert all(field not in after for field in ('started_at','finished_at','log','exit_code'))
+    with main.store.transaction() as tx:
+        assert tx.all('contributions')==events_before
+        assert tx.all('tasks')==tasks_before
+
+
+@pytest.mark.parametrize('status',['valid','invalid','queued','checking'])
+def test_target_recheck_rejects_non_error_states(target_client,status):
+    client=target_client
+    insight=client.post('/api/v1/insights',json=body()).json()
+    with main.store.transaction() as tx:
+        target=get_target(tx,insight['id']);target['status']=status;tx.put('insight_targets',target)
+    result=client.post('/api/v1/insights/'+insight['id']+'/lean-target/recheck',json=dict(contributor_id='1',contributor_name='Alice'))
+    assert result.status_code==409
+    with main.store.transaction() as tx:
+        assert get_target(tx,insight['id'])==target

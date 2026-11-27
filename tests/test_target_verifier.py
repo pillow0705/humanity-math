@@ -106,5 +106,75 @@ def test_target_dependency_errors_do_not_poison_queue(verifier,snapshot):
         tx.put('insight_targets',t)
         if snapshot['id']=='Lchanged':tx.put('lean_artifacts',dict(id='Lchanged',content_hash='modified'))
     assert worker.check_next_target()
-    with verifier.transaction() as tx:assert tx.get('insight_targets',t['id'])['status']=='invalid'
+    with verifier.transaction() as tx:assert tx.get('insight_targets',t['id'])['status']=='error'
     assert not worker.check_next_target()
+
+
+def test_old_queued_solution_without_fixed_target_is_rejected(verifier,monkeypatch):
+    from apps.api.infrastructure.store import digest
+    t=target();a=artifact(t);a.pop('target');a.update(verification_id='Vlegacy',created_at=1)
+    problem=dict(id='Ptest',status='open',lean_target=dict(expression='True'),target_status='reviewed')
+    with verifier.transaction() as tx:
+        tx.put('problems',problem)
+        tx.put('lean_artifacts',a)
+        tx.put('verifications',dict(id='Vlegacy',status='passed',policy=POLICY))
+        tx.put('solutions',dict(id='Slegacy',artifact_id=a['id'],problem_id='Ptest',status='queued',target_hash=digest(dict(expression='True')),created_at=1))
+    monkeypatch.setattr(worker,'sync_candidates',lambda tx:None)
+    def unexpected(*args):pytest.fail('Legacy unrelated proof reached final verifier')
+    monkeypatch.setattr(worker,'verify_solution',unexpected)
+    assert worker.once()
+    with verifier.transaction() as tx:
+        result=tx.get('solutions','Slegacy')
+        assert result['status']=='failed' and 'immutable Insight target' in result['log']
+
+
+def test_final_verification_prepares_supporting_closures_even_when_leaf_does_not_import_them(verifier,monkeypatch):
+    from apps.api.infrastructure.store import digest
+    t=target();t['status']='valid';a=artifact(t);a.update(verification_id='Vleaf',created_at=3)
+    dependency=dict(id='Ldep',insight_id='Idep',dependencies=[],created_at=1)
+    support=dict(id='Lsupport',insight_id='Isupport',dependencies=['Ldep'],created_at=2)
+    problem=dict(id='Ptest',status='open',lean_target=dict(expression='True'),target_status='reviewed')
+    with verifier.transaction() as tx:
+        tx.put('problems',problem);tx.put('insight_targets',t)
+        for art in [dependency,support,a]:tx.put('lean_artifacts',art)
+        tx.put('verifications',dict(id='Vleaf',status='passed',policy=POLICY,target_hash=t['target_hash'],target_matched=True))
+        tx.put('solutions',dict(id='Ssupport',artifact_id=a['id'],supporting_artifact_ids=['Lsupport','Ldep'],problem_id='Ptest',status='queued',target_hash=digest(dict(expression='True')),created_at=1))
+    monkeypatch.setattr(worker,'sync_candidates',lambda tx:None)
+    seen=[]
+    def check(s,p,leaf,arts):
+        seen.extend(x['id'] for x in arts)
+        assert leaf['id']=='Ltest'
+        return dict(status='failed',log='Synthetic stop after inspecting prepared closure')
+    monkeypatch.setattr(worker,'verify_solution',check)
+    assert worker.once()
+    assert seen==['Ldep','Lsupport','Ltest']
+
+
+@pytest.mark.parametrize('code',[124,125,126,127,137,139])
+def test_target_infrastructure_exit_is_retryable(verifier,monkeypatch,code):
+    monkeypatch.setattr(worker,'sandbox',lambda *args:(code,'Compiler infrastructure failed','image-test'))
+    assert worker.verify_target(target(),[])['status']=='error'
+
+
+def test_transient_target_failure_can_be_requeued_and_checked(verifier,monkeypatch):
+    t=target()
+    with verifier.transaction() as tx:tx.put('insight_targets',t)
+    def unavailable(*args):raise RuntimeError('Docker temporarily unavailable')
+    monkeypatch.setattr(worker,'verify_target',unavailable)
+    assert worker.check_next_target()
+    with verifier.transaction() as tx:
+        current=tx.get('insight_targets',t['id']);assert current['status']=='error'
+        current['status']='queued';tx.put('insight_targets',current)
+    monkeypatch.setattr(worker,'verify_target',lambda *args:dict(status='valid',log='Recovered'))
+    assert worker.check_next_target()
+    with verifier.transaction() as tx:assert tx.get('insight_targets',t['id'])['status']=='valid'
+
+
+def test_proof_queue_waits_for_target_infrastructure_retry(verifier,monkeypatch):
+    t=target();t['status']='error';a=artifact(t);a.update(verification_id='Vwaiting',created_at=1)
+    with verifier.transaction() as tx:
+        tx.put('insight_targets',t);tx.put('lean_artifacts',a)
+        tx.put('verifications',dict(id='Vwaiting',artifact_id=a['id'],status='queued',created_at=1))
+    monkeypatch.setattr(worker,'sync_candidates',lambda tx:None)
+    assert not worker.once()
+    with verifier.transaction() as tx:assert tx.get('verifications','Vwaiting')['status']=='queued'

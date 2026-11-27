@@ -25,7 +25,7 @@ def snapshot(tx,pid,scores=None):
         v=scores.verifications.get(a['verification_id'],{})
         if a.get('library_id')!=LIBRARY_ID:continue
         if a['insight_id'] in scores.verified_insights:passed.add(a['insight_id'])
-        if v.get('status') in ('queued','running') and a.get('target',{}).get('target_hash')==getattr(scores,'targets',{}).get(a['insight_id'],{}).get('target_hash') and a.get('target'):pending.add(a['insight_id'])
+        if v.get('status') in ('queued','running') and (a.get('target') or {}).get('target_hash')==getattr(scores,'targets',{}).get(a['insight_id'],{}).get('target_hash') and a.get('target'):pending.add(a['insight_id'])
     review_reserved=set();lean_reserved=set()
     for t in tx.all('tasks'):
         if t['problem_id']!=pid or not live(t):continue

@@ -51,6 +51,7 @@ def create_artifact(tx, body):
     from apps.api.modules.targets import get_target, target_proof_matches
     target=get_target(tx,insight['id'])
     if not target: raise HTTPException(409,'This insight needs an immutable Lean target before proof submission; its author must register the target first')
+    if target['status']=='error': raise HTTPException(409,'Target checking failed temporarily; its author must request a check retry before proof submission')
     if target['status']=='invalid': raise HTTPException(409,'The frozen Lean target is invalid; submit a corrected replacement insight before proving it')
     check_supersedes(tx,'lean_artifacts',body,insight['problem_id'])
     for existing in tx.all('lean_artifacts'):
@@ -94,7 +95,7 @@ def closure(tx, obj):
         if a['id'] in visiting: raise HTTPException(422,'Cyclic dependency')
         if a['id'] in result: return
         visiting.add(a['id'])
-        for i in dict.fromkeys(a['dependencies']+a.get('target',{}).get('dependencies',[])): visit(need(tx,'lean_artifacts',i))
+        for i in dict.fromkeys(a['dependencies']+(a.get('target') or {}).get('dependencies',[])): visit(need(tx,'lean_artifacts',i))
         visiting.remove(a['id']); result[a['id']]=a
     visit(obj); return list(result.values())
 
@@ -146,7 +147,7 @@ def artifact_summary(tx, a, prefix='', canonical=None):
                 dependencies=a['dependencies'], toolchain=a['toolchain'],
                 verification_policy=a['policy'], library_id=a.get('library_id'),
                 content_hash=a['content_hash'], status='legacy_unbound' if legacy else 'historical_duplicate' if duplicate else v['status'],
-                target_bound=bound,target_hash=a.get('target',{}).get('target_hash'),
+                target_bound=bound,target_hash=(a.get('target') or {}).get('target_hash'),
                 historical_duplicate=duplicate, canonical_proof_id=canonical.get(a['insight_id']),
                 reusable=v['status']=='passed' and v['policy']==POLICY and a.get('library_id')==LIBRARY_ID and not duplicate,
                 verification_id=v['id'], axioms=v.get('axioms'),

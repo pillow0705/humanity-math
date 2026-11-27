@@ -1557,6 +1557,53 @@
         }
       }
     },
+    "/api/v1/insights/{id}/lean-target/recheck": {
+      "post": {
+        "summary": "Recheck Insight Lean Target",
+        "operationId": "recheck_insight_lean_target_api_v1_insights__id__lean_target_recheck_post",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContributorAction"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/insights/{id}/dependencies": {
       "get": {
         "summary": "Insight Deps",
