@@ -127,3 +127,12 @@ def test_target_check_cannot_resurrect_invalidated_inflight_version(client,monke
     monkeypatch.setattr(worker,'verify_target',invalidated_during_check)
     assert worker.check_next_target()
     with main.store.transaction() as tx:assert tx.get('insight_targets',i['id'])['status']=='stale'
+
+
+def test_explicit_task_id_does_not_reset_automatic_dispatch_credits(client):
+    insight(client,None)
+    t=client.get('/api/v1/tasks?problem_id=P1&type=insight_explore&status=available').json()['items'][0]
+    with main.store.transaction() as tx:tx.put('dispatch_credits',dict(id='P1',credits={'review':7,'insight_explore':-7}))
+    r=client.post('/api/v1/tasks/claim',json=dict(contributor_id='2',contributor_name='Bob',task_id=t['id']))
+    assert r.status_code==200,r.text
+    with main.store.transaction() as tx:assert tx.get('dispatch_credits','P1')['credits']=={'review':7,'insight_explore':-7}

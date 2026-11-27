@@ -372,7 +372,7 @@ def claim(body:Claim):
                 guide=get_guide(tx,t['problem_id'])
                 t['synthesis_base_hash']=guide['content_hash']
                 t['previous_plan_id']=guide['id']
-            if not b['type'] and not active(tx):
+            if not b['type'] and not b['task_id'] and not active(tx):
                 from apps.api.modules.scheduling import record_dispatch
                 record_dispatch(tx,t,options)
             if t['type']=='lean_target' and not active(tx):
