@@ -24,3 +24,5 @@ Below the JSON header, body_markdown explains the approaches, current priorities
 Submit the entire replacement through the supplied per-problem research-guidance endpoint with identity, task_id, claim_token and base_hash copied from research_guidance.base_hash. Each problem has one live editing lease. If the base hash is stale, reload and claim a fresh lease; do not overwrite another editor's changes.
 
 Before submitting, check logical links, missing-node coverage, distinctness across approaches, reference validity and total file length. Subsequent Insight agents receive this shared document as context to choose their next mathematical step.
+
+Roadmap scheduling: maintain one shared file per problem. Create the first guide once; after the scheduling baseline, every twenty newly discovered Insight IDs add one further update task. Existing historical Insights do not generate a backlog of redundant initial updates. Tasks edit that same file serially under an exclusive lease; new update budgets can accumulate while an editor is working.

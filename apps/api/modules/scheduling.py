@@ -35,14 +35,28 @@ def snapshot(tx,pid,scores=None):
                 if ident in insights and person!=insights[ident]['contributor_id'] and (ident,person) not in reviewed:review_reserved.add((ident,person))
         if t['type']=='lean_work' and t.get('mode') in ('formalize','repair') and t.get('target_id') in insights:lean_reserved.add(t['target_id'])
     n=len(insights);r=len(reviewed);l=len(passed)
-    from apps.api.modules.synthesis import active_plans
-    plans=active_plans(tx,pid,scores)
     synthesis_reserved=sum(t['problem_id']==pid and t['type']=='research_synthesis' and live(t) for t in tx.all('tasks'))
     old=tx.get('dispatch_states',pid) or {}
-    synthesis_refill=n>0 and (100*len(plans)<5*n or (old.get('synthesis_refill',False) and 100*len(plans)<7*n))
+    # One initial shared guide; then one edit budget per twenty new Insight IDs.
+    # Monotone seen IDs preserve earned budgets across withdrawals/restorations.
+    accepted=[u for u in tx.all('research_updates') if u['problem_id']==pid and not u.get('legacy')]
+    schedule=tx.get('roadmap_schedule',pid)
+    current_ids=set(insights)
+    baseline_ids={ident for ident,obj in scores.objects['insights'].items() if obj['problem_id']==pid}
+    if schedule is None:
+        guide=tx.get('research_guides',pid) or {}
+        schedule=dict(id=pid,baseline_ids=sorted(baseline_ids),seen_ids=sorted(baseline_ids),initial_target=len(accepted)+(1 if n and not guide.get('header',{}).get('graphs') else 0))
+    seen=set(schedule['seen_ids'])|current_ids
+    if n and schedule['initial_target']==0 and not accepted:
+        schedule['initial_target']=1;schedule['baseline_ids']=sorted(baseline_ids)
+    schedule['seen_ids']=sorted(seen)
+    if schedule!=tx.get('roadmap_schedule',pid):tx.put('roadmap_schedule',schedule)
+    synthesis_target=schedule['initial_target']+len(seen-set(schedule['baseline_ids']))//20
+    synthesis_completed=len(accepted)
+    synthesis_refill=synthesis_completed<synthesis_target
     review_refill=n>0 and (r<2*n or (old.get('review_refill',False) and r<3*n))
     lean_refill=n>0 and (20*l<7*n or (old.get('lean_refill',False) and 20*l<11*n))
-    state=dict(synthesis_completed=len(plans),synthesis_reserved=synthesis_reserved,synthesis_refill=synthesis_refill,synthesis_target=(7*n+99)//100,synthesis_room=max(0,(7*n+99)//100-len(plans)-synthesis_reserved),id=pid,insights=n,reviews=r,verified_insights=l,review_reserved=len(review_reserved),lean_reserved=len((pending|lean_reserved)-passed),review_refill=review_refill,lean_refill=lean_refill,review_target=3*n,lean_target=((11*n+19)//20),review_room=max(0,3*n-r-len(review_reserved)),lean_room=max(0,((11*n+19)//20)-len(passed|pending|lean_reserved)))
+    state=dict(synthesis_completed=synthesis_completed,synthesis_reserved=synthesis_reserved,synthesis_refill=synthesis_refill,synthesis_target=synthesis_target,synthesis_room=max(0,synthesis_target-synthesis_completed-synthesis_reserved),id=pid,insights=n,reviews=r,verified_insights=l,review_reserved=len(review_reserved),lean_reserved=len((pending|lean_reserved)-passed),review_refill=review_refill,lean_refill=lean_refill,review_target=3*n,lean_target=((11*n+19)//20),review_room=max(0,3*n-r-len(review_reserved)),lean_room=max(0,((11*n+19)//20)-len(passed|pending|lean_reserved)))
     if state!=old:tx.put('dispatch_states',state)
     return state,insights,review_counts,passed,pending,lean_reserved
 

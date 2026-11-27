@@ -978,7 +978,7 @@ def test_lean_35_55_threshold_boundaries(n,passed,previous,expected,target):
     from apps.api.modules.scheduling import snapshot
     from apps.api.modules.lean import POLICY,LIBRARY_ID
     class Tx:
-        def get(self,*args):return {'lean_refill':previous}
+        def get(self,kind,ident):return {'lean_refill':previous} if kind=='dispatch_states' else None
         def all(self,*args):return []
         def put(self,*args):pass
     insights={str(i):dict(id=str(i),problem_id='P001',contributor_id='1') for i in range(n)}
@@ -1025,24 +1025,28 @@ def test_research_synthesis_claim_submit_context_and_credit(client):
     guide=client.get('/api/v1/problems/P001/research-guidance').json();assert guide['latest']['id']==plan['id']
     explore=dispatch_claim(client,type='insight_explore')
     assert explore['research_package']['research_guidance']['latest']['id']==plan['id']
-    # 1/30 < 5%, refill remains active to ceil(0.07*30)=3.
-    assert dispatch_metrics(client)['synthesis_target']==3
+    # The initial shared guide is covered; a second edit needs twenty new Insights.
+    assert dispatch_metrics(client)['synthesis_target']==1
+    assert client.post('/api/v1/tasks/claim',json=dict(contributor_id='2',contributor_name='Aster',problem_id='P001',type='research_synthesis')).status_code==409
+    for n in range(20):client.post('/api/v1/insights',json=dict(insight(),title='Route update trigger '+str(n)))
+    assert dispatch_metrics(client)['synthesis_target']==2
     next_claim=dispatch_claim(client,type='research_synthesis');assert next_claim['task']['previous_plan_id']==plan['id']
     assert client.post('/api/v1/research-plans',json=dict(body,task_id=next_claim['task']['id'],claim_token=next_claim['claim_token'])).status_code==409
     assert client.post('/api/v1/contributors/2/submissions/research_updates/'+plan['update_id']+'/withdraw',json=dict(contributor_id='2',contributor_name='Aster')).status_code==200
     assert client.get('/api/v1/problems/P001/research-guidance').json()['latest']['id']==plan['id']
 
-@pytest.mark.parametrize('n,done,previous,expected,target',[(100,4,False,True,7),(100,5,False,False,7),(100,5,True,True,7),(100,7,True,False,7),(0,0,True,False,0),(1,0,False,True,1)])
-def test_synthesis_thresholds(n,done,previous,expected,target):
-    from types import SimpleNamespace
-    from apps.api.modules.scheduling import snapshot
-    class Tx:
-        def all(self,k): return [dict(id='D'+str(i),problem_id='P001',created_at=i) for i in range(done)] if k=='research_updates' else []
-        def get(self,k,i): return dict(synthesis_refill=previous) if k=='dispatch_states' else None
-        def put(self,*args): pass
-    scores=SimpleNamespace(objects={'insights':{str(i):dict(id=str(i),problem_id='P001',contributor_id='1') for i in range(n)},'lean_artifacts':{}},withdrawn=set(),superseded=set(),latest_reviews={},verifications={})
-    state,*_=snapshot(Tx(),'P001',scores)
-    assert state['synthesis_refill']==expected and state['synthesis_target']==target
+def test_route_update_budget_grows_every_twenty_new_insights(client):
+    first=client.post('/api/v1/insights',json=insight()).json()
+    initial=dispatch_metrics(client);assert initial['synthesis_target']==1
+    for n in range(19):client.post('/api/v1/insights',json=dict(insight(),title='Growth '+str(n)))
+    assert dispatch_metrics(client)['synthesis_target']==1
+    client.post('/api/v1/insights',json=dict(insight(),title='Twentieth new insight'))
+    assert dispatch_metrics(client)['synthesis_target']==2
+    with main.store.transaction() as tx:
+        schedule=tx.get('roadmap_schedule','P001');assert len(set(schedule['seen_ids'])-set(schedule['baseline_ids']))==20
+    for n in range(20):client.post('/api/v1/insights',json=dict(insight(),title='Second block '+str(n)))
+    assert dispatch_metrics(client)['synthesis_target']==3
+
 
 def test_exploration_has_no_mandatory_insight_target(client):
     root=client.post('/api/v1/insights',json=insight()).json()
