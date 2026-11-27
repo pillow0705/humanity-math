@@ -42,6 +42,7 @@ def validate_graphs(tx,pid,header):
         if not goal or goal['kind']!='goal' or goal['status']!='target':raise HTTPException(422,'goal_node_id must identify the original problem target')
         if sum(n['kind']=='goal' for n in nodes.values())!=1:raise HTTPException(422,'Each proof graph must have exactly one original-problem goal')
         goal['statement']=statement
+        goal['insight_ids']=[]
         for node in nodes.values():
             if not node['statement']:raise HTTPException(422,'Every mathematical node needs an exact statement')
             if node['kind']!='goal' and node['status']=='target':raise HTTPException(422,'Only the original goal uses target status')
@@ -70,7 +71,7 @@ def validate_graphs(tx,pid,header):
         listed=[x['node_id'] for x in graph['missing']]
         if len(set(listed))!=len(listed) or set(listed)!=missing:raise HTTPException(422,'missing must describe every missing node exactly once')
         # Ignore cosmetic graph/node identifiers when catching duplicate routes.
-        labels={i:digest({k:n[k] for k in ('kind','statement','status','insight_ids')}) for i,n in nodes.items()}
+        labels={i:digest(dict(kind=n['kind'],statement=n['statement'],status=n['status'],insight_ids=sorted(n['insight_ids']))) for i,n in nodes.items()}
         signature=digest(dict(nodes=sorted(labels.values()),steps=sorted((tuple(sorted(labels[i] for i in s['requires'])),labels[s['concludes']]) for s in graph['steps'])))
         if signature in signatures:raise HTTPException(422,'Duplicate proof routes: merge graphs that differ only in labels or wording')
         signatures.add(signature)
