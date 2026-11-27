@@ -75,7 +75,7 @@ def reset(data,backup,apply=False):
         insights=read_all(data,'insights');hidden={s['object_id'] for s in read_all(data,'submission_states') if s.get('withdrawn')}
         superseded={i['supersedes_id'] for i in insights if i.get('supersedes_id')}
         ids=sorted(i['id'] for i in insights if i['problem_id'] in active and i['id'] not in hidden|superseded)
-        write(data/'platform_states/lean_target_migration.json',dict(id='lean_target_migration',phase='target_backfill',required_insight_ids=ids,batch_size=3,batch_points=8,started_at=time.time(),backup=str(archive)))
+        write(data/'platform_states/lean_target_migration.json',dict(id='lean_target_migration',phase='target_backfill',required_insight_ids=ids,batch_size=5,batch_points=8,started_at=time.time(),backup=str(archive)))
         for pid in active:
             ident='T'+uuid.uuid4().hex
             write(data/'tasks'/(ident+'.json'),dict(id=ident,problem_id=pid,type='lean_target',target_id=None,mode=None,status='available',attempts=0,created_at=time.time()))

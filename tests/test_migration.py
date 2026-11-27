@@ -29,10 +29,16 @@ def validate_targets():
         for t in tx.all('insight_targets'):t['status']='valid';tx.put('insight_targets',t)
         return progress(tx)
 
-def test_exclusive_three_item_batches_reservations_rewards_and_resume(client):
+def test_exclusive_five_item_batches_reservations_rewards_and_resume(client):
+    with main.store.transaction() as tx:
+        for n in (5,6):
+            i=dict(tx.get('insights','I0'),id='I'+str(n),created_at=n)
+            tx.put('insights',i)
+        state=tx.get('platform_states','lean_target_migration')
+        state['required_insight_ids']+=['I5','I6'];tx.put('platform_states',state)
     first=claim(client);second=claim(client,'2','Bob')
-    assert first['task']['type']=='lean_target' and len(first['task']['target_ids'])==3
-    assert len(first['research_package']['materials'])==3
+    assert first['task']['type']=='lean_target' and len(first['task']['target_ids'])==5
+    assert len(first['research_package']['materials'])==5
     assert first['research_package']['submission']['url']=='/api/v1/lean-targets/batch'
     assert len(second['task']['target_ids'])==2
     assert set(first['task']['target_ids']).isdisjoint(second['task']['target_ids'])
@@ -94,3 +100,16 @@ def test_migration_allows_only_zero_moderation_not_normal_reviews(client):
     assert r.status_code==200,r.text
     assert client.get('/api/v1/platform-status').json()['total']==4
     assert client.get('/api/v1/trash').json()['items'][0]['insight_id']=='I0'
+
+
+def test_existing_three_item_lease_survives_larger_batch_setting(client,monkeypatch):
+    from apps.api.modules import migration
+    with monkeypatch.context() as patch:
+        patch.setattr(migration,'BATCH_SIZE',3)
+        old=claim(client)
+    assert len(old['task']['target_ids'])==3
+    assert client.get('/api/v1/platform-status').json()['batch_size']==5
+    response=client.post('/api/v1/lean-targets/batch',json=body(old))
+    assert response.status_code==200,response.text
+    validate_targets()
+    assert client.get('/api/v1/contributors/1/score').json()['score']==8

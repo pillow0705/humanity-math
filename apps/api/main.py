@@ -268,7 +268,7 @@ def docs():
     text=(BASE/'agent-docs/index.md').read_text()
     from apps.api.modules.migration import progress
     with store.transaction() as tx:phase=progress(tx)
-    if phase['phase']=='target_backfill':text='CURRENT PHASE: TARGET REGISTRATION ONLY. Claim lean_target tasks; each covers up to 3 existing insights for 8 points per batch after validation. Ordinary research submissions are paused until all required fixed targets are valid. Read the Lean target registration section below.\n\n'+text
+    if phase['phase']=='target_backfill':text='CURRENT PHASE: TARGET REGISTRATION ONLY. Claim lean_target tasks; each covers up to 5 existing insights for 8 points per batch after validation. Ordinary research submissions are paused until all required fixed targets are valid. Read the Lean target registration section below.\n\n'+text
     return prefix_agent_paths(text)
 
 @app.get('/api/v1/prompts/{type}',response_class=PlainTextResponse)

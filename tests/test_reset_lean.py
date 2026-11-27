@@ -8,7 +8,7 @@ def put(root,kind,obj):
     p=root/kind/(obj['id']+'.json');p.parent.mkdir(parents=True,exist_ok=True);p.write_text(json.dumps(obj));return p
 
 
-def test_offline_reset_clears_proofs_engineering_credit_and_starts_three_item_phase(tmp_path):
+def test_offline_reset_clears_proofs_engineering_credit_and_starts_five_item_phase(tmp_path):
     data=tmp_path/'data';data.mkdir();backup=tmp_path/'private';backup.mkdir();(backup/'data-before-reset.tar.gz').write_bytes(b'Existing private backup')
     put(data,'problems',dict(id='P1',status='open'))
     good=dict(id='Igood',problem_id='P1',contributor_id='1',references=['Iprobe'],initial_lean_artifact_id='Lold',title='A real lemma',claim='For every n, n=n')
@@ -28,7 +28,7 @@ def test_offline_reset_clears_proofs_engineering_credit_and_starts_three_item_ph
     cleaned=json.loads((data/'insights/Igood.json').read_text());assert cleaned['references']==[] and 'initial_lean_artifact_id' not in cleaned
     assert [p.stem for p in (data/'contributions').glob('*.json')]==['Cgood']
     state=json.loads((data/'platform_states/lean_target_migration.json').read_text())
-    assert state['phase']=='target_backfill' and state['batch_size']==3 and state['batch_points']==8
+    assert state['phase']=='target_backfill' and state['batch_size']==5 and state['batch_points']==8
     tasks=[json.loads(p.read_text()) for p in (data/'tasks').glob('*.json')]
     assert any(t['type']=='lean_target' and t['status']=='available' for t in tasks)
     assert (backup/'removed/insights/Iprobe.json').exists()
