@@ -58,6 +58,8 @@ def submit_batch(tx,body):
                 task_id=t['id'],batch_size=len(targets),supersedes_id=None,target_id=obj['id'],target_kind='insights',problem_id=t['problem_id'],
                 verdict=item['verdict'],rationale=item['rationale'],score=item['score'],target_alignment=item.get('target_alignment','not_applicable'),target_hash=item['target_hash']))
         contribute(tx,r,'review');results.append(r)
+        from apps.api.modules.trash import zero_review
+        zero_review(tx,r)
     result_by_target={r['target_id']:r['id'] for r in results}
     t.update(status='submitted',result_ids=[r['id'] for r in results],submitted_at=time.time())
     tx.put('tasks',t)

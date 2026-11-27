@@ -62,7 +62,9 @@ def create_artifact(tx, body):
     if len(set(body['dependencies'])) != len(body['dependencies']): raise HTTPException(422,'Duplicate dependencies')
     deps = [need(tx,'lean_artifacts',i) for i in body['dependencies']]
     canonical = canonical_proof_ids(tx)
+    from apps.api.modules.lifecycle import withdrawn
     for dep in deps:
+        if withdrawn(tx,'insights',dep['insight_id']) or withdrawn(tx,'lean_artifacts',dep['id']):raise HTTPException(422,'Use only active verified proof dependencies; this dependency has been withdrawn')
         if dep['insight_id'] in canonical and canonical[dep['insight_id']]!=dep['id']:
             raise HTTPException(409,dict(message='Use the canonical proof for this insight; the requested module is a historical duplicate.',existing_id=canonical[dep['insight_id']]))
         v = need(tx,'verifications',dep['verification_id'])
@@ -80,10 +82,10 @@ def create_artifact(tx, body):
     contribute(tx,obj,'lean_work')
     return obj
 
-def validate_source(source, dependencies):
+def validate_source(source, dependencies, target_dependencies=()):
     if re.search(r'\b(sorry|admit|axiom|unsafe|initialize|builtin_initialize|run_tac|run_elab|run_cmd|run_meta|run_io|elab|macro|syntax|extern|implemented_by|native_decide|skipKernelTC)\b|#|\x00', source):
         raise HTTPException(422,'Unsupported metaprogramming, unproved axiom or placeholder; submit ordinary Lean definitions and proofs')
-    allowed = {'MC.'+d['id'] for d in dependencies}
+    allowed = {'MC.'+d['id'] for d in dependencies}|{d['target_module'] for d in target_dependencies}
     for line in source.splitlines():
         if re.match(r'^\s*import\b',line):
             imports = line.strip().split()[1:]

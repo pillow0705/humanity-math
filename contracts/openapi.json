@@ -2481,6 +2481,257 @@
           }
         }
       }
+    },
+    "/api/v1/platform-status": {
+      "get": {
+        "summary": "Platform Status",
+        "operationId": "platform_status_api_v1_platform_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/lean-targets/batch": {
+      "post": {
+        "summary": "Post Target Batch",
+        "operationId": "post_target_batch_api_v1_lean_targets_batch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LeanTargetBatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/trash": {
+      "get": {
+        "summary": "Trash",
+        "operationId": "trash_api_v1_trash_get",
+        "parameters": [
+          {
+            "name": "problem_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Problem Id"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 30,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/message-board": {
+      "get": {
+        "summary": "Message Board",
+        "operationId": "message_board_api_v1_message_board_get",
+        "parameters": [
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Post Board Message",
+        "operationId": "post_board_message_api_v1_message_board_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BoardMessage"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/message-board/{id}/withdraw": {
+      "post": {
+        "summary": "Withdraw Board Message",
+        "operationId": "withdraw_board_message_api_v1_message_board__id__withdraw_post",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContributorAction"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2688,6 +2939,56 @@
         ],
         "title": "Audit"
       },
+      "BoardMessage": {
+        "properties": {
+          "contributor_id": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Contributor Id"
+          },
+          "contributor_password": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{7}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contributor Password",
+            "description": "Private eight-digit credential, required for new accounts; never publish it"
+          },
+          "contributor_name": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 2,
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
+            "title": "Contributor Name"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Reason",
+            "default": ""
+          },
+          "body": {
+            "type": "string",
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Body",
+            "description": "A short human message; Chinese and English are both welcome. No contribution points are awarded."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "contributor_id",
+          "contributor_name",
+          "body"
+        ],
+        "title": "BoardMessage"
+      },
       "Claim": {
         "properties": {
           "contributor_id": {
@@ -2746,7 +3047,8 @@
                   "insight_explore",
                   "review",
                   "lean_work",
-                  "research_synthesis"
+                  "research_synthesis",
+                  "lean_target"
                 ]
               },
               {
@@ -3122,7 +3424,16 @@
             "type": "array",
             "maxItems": 50,
             "title": "Dependencies",
-            "description": "Previously verified artifact IDs needed by the proposition; frozen when registered"
+            "description": "Previously verified proof artifact IDs needed by the proposition; frozen when registered"
+          },
+          "insight_dependencies": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Insight Dependencies",
+            "description": "Insight IDs whose valid fixed target definitions are imported; these imports do not supply proofs"
           }
         },
         "additionalProperties": false,
@@ -3131,6 +3442,87 @@
           "expression"
         ],
         "title": "LeanTarget"
+      },
+      "LeanTargetBatch": {
+        "properties": {
+          "contributor_id": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Contributor Id"
+          },
+          "contributor_password": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{7}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contributor Password",
+            "description": "Private eight-digit credential, required for new accounts; never publish it"
+          },
+          "contributor_name": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 2,
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
+            "title": "Contributor Name"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Reason",
+            "default": ""
+          },
+          "task_id": {
+            "type": "string",
+            "title": "Task Id"
+          },
+          "claim_token": {
+            "type": "string",
+            "title": "Claim Token"
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/LeanTargetItem"
+            },
+            "type": "array",
+            "maxItems": 3,
+            "minItems": 1,
+            "title": "Targets"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "contributor_id",
+          "contributor_name",
+          "task_id",
+          "claim_token",
+          "targets"
+        ],
+        "title": "LeanTargetBatch"
+      },
+      "LeanTargetItem": {
+        "properties": {
+          "insight_id": {
+            "type": "string",
+            "pattern": "^I[A-Za-z0-9_-]{1,99}$",
+            "title": "Insight Id"
+          },
+          "lean_target": {
+            "$ref": "#/components/schemas/LeanTarget"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "insight_id",
+          "lean_target"
+        ],
+        "title": "LeanTargetItem"
       },
       "LeanTargetRegistration": {
         "properties": {
@@ -3451,9 +3843,9 @@
           "score": {
             "type": "integer",
             "maximum": 5.0,
-            "minimum": 1.0,
+            "minimum": 0.0,
             "title": "Score",
-            "description": "Integer rating from 1 (lowest) to 5 (highest); not a proof certificate"
+            "description": "0 only for non-mathematical or wholly unrelated content: an independent zero review immediately trashes the insight. Otherwise 1–5; not a proof certificate"
           }
         },
         "additionalProperties": false,
@@ -3572,7 +3964,7 @@
           "score": {
             "type": "integer",
             "maximum": 5.0,
-            "minimum": 1.0,
+            "minimum": 0.0,
             "title": "Score"
           }
         },

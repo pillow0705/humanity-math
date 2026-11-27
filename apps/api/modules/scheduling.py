@@ -48,6 +48,9 @@ def snapshot(tx,pid,scores=None):
 
 
 def sync_schedule(tx,problem_id=None):
+    from apps.api.modules.migration import sync
+    migration=sync(tx,problem_id)
+    if migration is not None:return migration
     sync_candidates(tx)
     ensure_exploration(tx,problem_id)
     scores=Scores(tx);depths=dependency_depths(scores);priority=priority_targets(tx)
@@ -93,6 +96,9 @@ def sync_schedule(tx,problem_id=None):
 
 def dispatch_priority(tx,t,states,priority,automatic=True,cache=None):
     """None means no useful capacity; lower integer wins."""
+    from apps.api.modules.migration import active
+    if active(tx):return -10 if t['type']=='lean_target' and available(t) else None
+    if t['type']=='lean_target':return None
     state=states.get(t['problem_id'])
     if not state or not available(t):return None
     if t['type']=='research_synthesis':

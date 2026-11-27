@@ -55,6 +55,7 @@ def file_hash(p): return hashlib.sha256(p.read_bytes()).hexdigest()
 def target_cache_files(target): return CACHE/'targets'/target['target_hash']
 
 def prepare_target(work,target):
+    for dependency in target.get('insight_dependency_snapshot',[]):prepare_target(work,dependency)
     cached=target_cache_files(target)
     meta=json.loads((cached/'manifest.json').read_text())
     if (meta.get('target_hash')!=target['target_hash'] or meta.get('policy')!=POLICY
@@ -96,6 +97,7 @@ def verify_target(target,arts):
         prepare(work,arts)
         relative=target['target_module'].replace('.','/')+'.lean'
         path=work/relative;path.parent.mkdir(parents=True,exist_ok=True);os.chmod(path.parent,0o777)
+        for dependency in target.get('insight_dependency_snapshot',[]):prepare_target(work,dependency)
         source=target_source(target);path.write_text(source)
         code,log,image=sandbox(work,['/opt/lean/bin/lean','-j','1','-o',relative.replace('.lean','.olean'),relative],True)
         if code: return dict(status='error' if code in (124,125,126,127,137,139) else 'invalid',log=log,exit_code=code)
@@ -172,7 +174,15 @@ def check_next_target():
     with STORE.transaction() as tx:
         queued=[x for x in tx.all('insight_targets') if x['status']=='queued']
         if not queued:return False
-        target=min(queued,key=lambda x:(x.get('created_at',0),x['id']))
+        target=None
+        for candidate in sorted(queued,key=lambda x:(x.get('created_at',0),x['id'])):
+            dependencies=[(snapshot,tx.get('insight_targets',snapshot['insight_id'])) for snapshot in candidate.get('insight_dependency_snapshot',[])]
+            broken=any(not current or current['target_hash']!=snapshot['target_hash'] or current['status']=='invalid' for snapshot,current in dependencies)
+            if broken:
+                candidate.update(status='invalid',finished_at=time.time(),log='A frozen target-definition dependency is invalid or has changed. Correct this target in a new migration batch after its prerequisite is valid.')
+                tx.put('insight_targets',candidate);return True
+            if all(current['status']=='valid' for _,current in dependencies):target=candidate;break
+        if target is None:return False
         target.update(status='checking',started_at=time.time());tx.put('insight_targets',target)
     try:
         arts={}
@@ -187,6 +197,8 @@ def check_next_target():
         current=need(tx,'insight_targets',target['id'])
         if current['target_hash']!=target['target_hash']:raise RuntimeError('Immutable Insight target changed during checking')
         current.update(result,finished_at=time.time());tx.put('insight_targets',current)
+        from apps.api.modules.migration import sync
+        sync(tx)
     return True
 
 def once():

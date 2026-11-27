@@ -111,7 +111,7 @@ def test_review_score_contract(client):
     url='/api/v1/insights/'+i['id']+'/reviews'
     body=dict(contributor_id='4',contributor_name='Beta',verdict='support',rationale='Evidence-based rating')
     assert client.post(url,json=body).status_code==422
-    for bad in [0,6,2.5,4.0,"4",True,None]:
+    for bad in [-1,6,2.5,4.0,"4",True,None]:
         assert client.post(url,json=dict(body,target_alignment='aligned',score=bad)).status_code==422
     assert client.post(url,json=dict(body,target_alignment='aligned',score=4,suggestions='removed')).status_code==422
     for value in [1,5]:
@@ -187,7 +187,7 @@ def test_scoring_citations_lean_and_final_use(client):
     for rating in [5,1]:
         response=client.post('/api/v1/insights/'+i['id']+'/reviews',json=dict(contributor_id='4',contributor_name='Beta',verdict='concern',target_alignment='aligned',score=rating,rationale='Review'))
         assert response.status_code==200
-    assert ev()['effective_reviews']==1 and ev()['contribution_points']==10.5
+    assert ev()['effective_reviews']==1 and ev()['contribution_points']==6
     assert client.get('/api/v1/contributors/4/score').json()['score']==6
     client.post('/api/v1/insights/'+i['id']+'/reviews',json=dict(contributor_id='2',contributor_name='Aster',verdict='support',target_alignment='aligned',score=5,rationale='Self'))
     assert ev()['effective_reviews']==1
@@ -197,9 +197,9 @@ def test_scoring_citations_lean_and_final_use(client):
         v=tx.get('verifications',a['verification_id']);v['status']='passed';put_test_verification(tx,v)
         tx.new('solutions','S',dict(problem_id='P001',status='verified',used_insight_ids=[i['id']],contributor_id='4'))
     assert ev()['lean_bonus']==10 and ev()['final_proof_bonus']==3
-    assert ev()['contribution_points']==23.5
+    assert ev()['contribution_points']==19
     assert client.get('/api/v1/contributors/4/score').json()['score']==14
-    assert client.get('/api/v1/contributors/2/score').json()['score']==23.5
+    assert client.get('/api/v1/contributors/2/score').json()['score']==19
     assert client.get('/api/v1/leaderboard').json()['items'][0]['id']=='2'
 
 
@@ -247,8 +247,8 @@ def test_frontend_entry_and_four_task_contract(client):
     assert home.status_code==200 and '人类求知' in home.text and '<html' in home.text
     assert client.get('/assets/app.js').status_code==200
     spec=client.get('/openapi.json').json()
-    assert set(spec['components']['schemas']['Claim']['properties']['type']['anyOf'][0]['enum'])=={'insight_explore','review','lean_work','research_synthesis'}
-    assert client.get('/api/v1/contribution-policy').json()['base_points']=={'insights':10,'review':6,'lean_work':8,'research_synthesis':15}
+    assert set(spec['components']['schemas']['Claim']['properties']['type']['anyOf'][0]['enum'])=={'insight_explore','review','lean_work','research_synthesis','lean_target'}
+    assert client.get('/api/v1/contribution-policy').json()['base_points']=={'insights':10,'review':6,'lean_work':8,'research_synthesis':15,'lean_target':8}
     assert client.get('/api/v1/prompts/lean_work').status_code==200
     assert client.get('/api/v1/prompts/lean_audit').status_code==404
 
@@ -1202,8 +1202,8 @@ def test_insight_ranking_scores_search_and_pagination(client):
     assert client.post('/api/v1/insights/'+second['id']+'/reviews',json=dict(contributor_id='4',contributor_name='Beta',verdict='support',rationale='Checked the proof',target_alignment='aligned',score=5)).status_code==200
     data=client.get('/api/v1/insights/ranking?problem_id=P001&limit=2').json()
     assert data['total']==3
-    assert [x['id'] for x in data['items']]==[first['id'],second['id']]
-    assert [x['evaluation']['contribution_points'] for x in data['items']]==[11,10.5]
+    assert [x['id'] for x in data['items']]==[second['id'],first['id']]
+    assert [x['evaluation']['contribution_points'] for x in data['items']]==[30,11]
     last=client.get('/api/v1/insights/ranking?problem_id=P001&offset=2').json()['items'][0]
     assert last['id']==third['id'] and last['rank']==3
     search=client.get('/api/v1/insights/ranking',params=dict(problem_id='P001',q='Citing')).json()

@@ -1,7 +1,7 @@
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-TaskType = Literal['insight_explore','review','lean_work','research_synthesis']
+TaskType = Literal['insight_explore','review','lean_work','research_synthesis','lean_target']
 class Strict(BaseModel):
     model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
 class Submission(Strict):
@@ -20,7 +20,8 @@ class InlineLean(Strict):
 class LeanTarget(Strict):
     definitions: str = Field(default='',max_length=50000,description='Ordinary Lean definitions/imports needed to state the fixed proposition; no proof placeholders or new axioms')
     expression: str = Field(min_length=1,max_length=20000,description='A complete Lean proposition, including all intended quantifiers and hypotheses; not a theorem declaration or proof')
-    dependencies: list[str] = Field(default_factory=list,max_length=50,description='Previously verified artifact IDs needed by the proposition; frozen when registered')
+    dependencies: list[str] = Field(default_factory=list,max_length=50,description='Previously verified proof artifact IDs needed by the proposition; frozen when registered')
+    insight_dependencies: list[str] = Field(default_factory=list,max_length=100,description='Insight IDs whose valid fixed target definitions are imported; these imports do not supply proofs')
 
 class Insight(Submission):
     lean_target: LeanTarget
@@ -48,14 +49,14 @@ class Review(Submission):
     target_hash: str | None = Field(default=None,pattern=r'^[0-9a-f]{64}$',description='Optional expected immutable target hash; the server records the actual hash with the review')
     verdict: Literal['support','concern','refute','needs_work']
     rationale: str = Field(min_length=1, max_length=30000)
-    score: int = Field(ge=1, le=5, strict=True, description='Integer rating from 1 (lowest) to 5 (highest); not a proof certificate')
+    score: int = Field(ge=0, le=5, strict=True, description='0 only for non-mathematical or wholly unrelated content: an independent zero review immediately trashes the insight. Otherwise 1–5; not a proof certificate')
 class ReviewItem(Strict):
     target_alignment: TargetAlignment = 'not_applicable'
     target_hash: str | None = Field(default=None,pattern=r'^[0-9a-f]{64}$')
     insight_id: str = Field(pattern=r'^I[A-Za-z0-9_-]{1,99}$')
     verdict: Literal['support','concern','refute','needs_work']
     rationale: str = Field(min_length=1,max_length=30000)
-    score: int = Field(ge=1,le=5,strict=True)
+    score: int = Field(ge=0,le=5,strict=True)
 class ReviewBatch(Strict):
     contributor_id: str = Field(pattern=r'^[1-9][0-9]*$')
     contributor_password: str | None = Field(default=None,pattern=r'^[1-9][0-9]{7}$',description='Private eight-digit credential, required for new accounts; never publish it')
@@ -145,3 +146,22 @@ class ResearchPlan(Submission):
 
 class LeanTargetRegistration(ContributorAction):
     lean_target: LeanTarget
+
+
+class LeanTargetItem(Strict):
+    insight_id: str = Field(pattern=r'^I[A-Za-z0-9_-]{1,99}$')
+    lean_target: LeanTarget
+
+class LeanTargetBatch(ContributorAction):
+    task_id: str
+    claim_token: str
+    targets: list[LeanTargetItem] = Field(min_length=1,max_length=3)
+    @field_validator('targets')
+    @classmethod
+    def unique_insights(cls,value):
+        if len({x.insight_id for x in value})!=len(value): raise ValueError('Each assigned insight must appear exactly once')
+        return value
+
+
+class BoardMessage(ContributorAction):
+    body: str = Field(min_length=1,max_length=1000,description='A short human message; Chinese and English are both welcome. No contribution points are awarded.')

@@ -292,3 +292,40 @@ def test_statement_elaboration_does_not_accept_unbound_parameters(tmp_path,monke
     assert worker.once()
     checked=c.get('/api/v1/insights/'+response.json()['id']+'/lean-target').json()
     assert checked['status']=='invalid',checked
+
+
+@pytest.mark.skipif(os.environ.get('RUN_LEAN_TESTS')!='1',reason='Requires pinned verifier')
+def test_target_definition_imports_are_reusable_without_claiming_a_proof(tmp_path,monkeypatch):
+    s=Store(tmp_path);(tmp_path/'artifacts').mkdir()
+    monkeypatch.setattr(main,'store',s);monkeypatch.setattr(worker,'STORE',s);monkeypatch.setattr(worker,'CACHE',tmp_path/'artifacts/cache')
+    with s.transaction() as tx:tx.put('problems',dict(id='PDEF',title='Definition dependencies',statement='Test',status='open',created_at=time.time()))
+    c=TestClient(main.app);c.post('/api/v1/contributors/claim',json={'name':'DefinitionTester'})
+    identity=dict(contributor_id='1',contributor_name='DefinitionTester')
+    first=post_insight(c,dict(identity,problem_id='PDEF',title='Definition',claim='Successor',proof='Definition',proof_status='claimed_complete',lean_target=dict(definitions='def step (n : Nat) : Nat := n + 1',expression='∀ n : Nat, step n = n + 1'))).json()
+    target=dict(insight_dependencies=[first['id']],expression='∀ n : Nat, MCTargets.'+first['id']+'.step n = n + 1')
+    second=post_insight(c,dict(identity,problem_id='PDEF',title='Reuse a definition',claim='A reused definition',proof='By reflexivity',proof_status='claimed_complete',references=[first['id']],lean_target=target)).json()
+    assert c.get('/api/v1/lean/artifacts').json()['total']==0
+    r=c.post('/api/v1/lean/artifacts',json=dict(identity,insight_id=second['id'],theorem='reuseDef',source='theorem reuseDef : MCTargets.'+second['id']+'.statement := by intro n; rfl'))
+    assert r.status_code==200,r.text
+    assert worker.once()
+    verification=c.get('/api/v1/lean/verifications/'+r.json()['verification_id']).json()
+    assert verification['status']=='passed' and verification['target_matched'],verification
+
+
+@pytest.mark.skipif(os.environ.get('RUN_LEAN_TESTS')!='1',reason='Requires pinned verifier')
+def test_migration_batch_imports_targets_in_dependency_order(tmp_path,monkeypatch):
+    s=Store(tmp_path);(tmp_path/'artifacts').mkdir()
+    monkeypatch.setattr(main,'store',s);monkeypatch.setattr(worker,'STORE',s);monkeypatch.setattr(worker,'CACHE',tmp_path/'artifacts/cache')
+    with s.transaction() as tx:
+        tx.put('problems',dict(id='PBATCH',title='Batch references',statement='Test',status='open',created_at=time.time()))
+        for n in range(3):tx.put('insights',dict(id='IB'+str(n),problem_id='PBATCH',contributor_id='99',title='Batch target',claim='True',proof='Introduction',proof_status='claimed_complete',references=['IB0'] if n==1 else [],created_at=n))
+        tx.put('platform_states',dict(id='lean_target_migration',phase='target_backfill',required_insight_ids=['IB0','IB1','IB2']))
+    c=TestClient(main.app);c.post('/api/v1/contributors/claim',json={'name':'BatchTester'})
+    identity=dict(contributor_id='1',contributor_name='BatchTester')
+    claim=c.post('/api/v1/tasks/claim',json=identity).json()
+    targets=[dict(insight_id='IB2',lean_target=dict(expression='True')),dict(insight_id='IB1',lean_target=dict(expression='∀ n : Nat, MCTargets.IB0.step n = n + 1',insight_dependencies=['IB0'])),dict(insight_id='IB0',lean_target=dict(definitions='def step (n : Nat) : Nat := n + 1',expression='True'))]
+    response=c.post('/api/v1/lean-targets/batch',json=dict(identity,task_id=claim['task']['id'],claim_token=claim['claim_token'],targets=targets))
+    assert response.status_code==200,response.text
+    for _ in range(3):assert worker.once()
+    assert c.get('/api/v1/platform-status').json()['phase']=='normal'
+    assert c.get('/api/v1/contributors/1/score').json()['score']==8
