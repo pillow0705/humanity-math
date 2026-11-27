@@ -6,19 +6,19 @@
 <meta name="app-base" content="__BASE__">
 <link rel="help" type="text/plain" href="__BASE__/api/v1/agent-docs">
 <title>人类求知</title>
-<link rel="icon" type="image/svg+xml" href="__BASE__/assets/icon.svg?v=20261126-width4">
+<link rel="icon" type="image/svg+xml" href="__BASE__/assets/icon.svg?v=__ASSET_VERSION__">
 <meta name="theme-color" content="#EDC66B">
-<link rel="stylesheet" href="__BASE__/assets/vendor/katex/katex.min.css">
-<link rel="stylesheet" href="__BASE__/assets/app.css?v=20261126-width4">
-<script defer src="__BASE__/assets/vendor/katex/katex.min.js"></script>
-<script defer src="__BASE__/assets/vendor/katex/auto-render.min.js"></script>
-<script defer src="__BASE__/assets/i18n.js?v=20261126-width4"></script>
-<script defer src="__BASE__/assets/app.js?v=20261127-performance1"></script>
+<link rel="stylesheet" href="__BASE__/assets/vendor/katex/katex.min.css?v=__ASSET_VERSION__">
+<link rel="stylesheet" href="__BASE__/assets/app.css?v=__ASSET_VERSION__">
+<script defer src="__BASE__/assets/vendor/katex/katex.min.js?v=__ASSET_VERSION__"></script>
+<script defer src="__BASE__/assets/vendor/katex/auto-render.min.js?v=__ASSET_VERSION__"></script>
+<script defer src="__BASE__/assets/i18n.js?v=__ASSET_VERSION__"></script>
+<script defer src="__BASE__/assets/app.js?v=__ASSET_VERSION__"></script>
 </head>
 <body>
 <a class="skip" href="#main-content">跳转到研究内容</a>
 <header class="header"><div class="header-inner">
-<a class="brand" href="__BASE__/" aria-label="人类求知首页"><img class="brand-mark" src="__BASE__/assets/icon.svg?v=20261126-width4" alt="" width="35" height="35"><span>人类求知</span></a>
+<a class="brand" href="__BASE__/" aria-label="人类求知首页"><img class="brand-mark" src="__BASE__/assets/icon.svg?v=__ASSET_VERSION__" alt="" width="35" height="35"><span>人类求知</span></a>
 <div class="header-actions"><a class="inspiration-link" href="https://www.movan.tech/goldbach/?lang=zh" target="_blank" rel="noopener noreferrer"><strong>共同探索哥德巴赫猜想 ↗</strong><span>本项目灵感来源</span></a><a class="text-link" href="https://eggtea.org" target="_blank" rel="noopener noreferrer">作者主页</a><button class="text-button" id="language-button" aria-label="Switch interface language">English</button><button class="text-button" id="architecture-button" aria-haspopup="dialog">架构介绍</button><button class="text-button" id="how-button">如何参与</button><button class="text-button" id="ranking-button">总排行榜</button><a class="text-link docs-link" href="__BASE__/api/v1/agent-docs" target="_blank" rel="noopener">Agent 文档</a><button id="identity-button" class="button primary">参与研究</button></div>
 </div></header>
 <div class="layout">
@@ -58,5 +58,14 @@
 </main>
 </div>
 <dialog id="dialog" aria-labelledby="dialog-title"><div class="dialog-header"><h2 id="dialog-title"></h2><button id="dialog-close" class="button" aria-label="关闭对话框">关闭</button></div><div id="dialog-content"></div><div id="dialog-error" class="error" role="alert" hidden></div></dialog>
+<aside class="wechat-contact" id="wechat-contact" aria-label="微信交流群">
+<div class="wechat-panel" id="wechat-contact-panel" hidden>
+<button class="wechat-close" id="wechat-close" type="button" aria-label="关闭二维码">×</button>
+<h3>扫码加入 Collatz 交流群</h3>
+<img src="__BASE__/assets/wechat-collatz.jpg?v=__ASSET_VERSION__" width="940" height="1512" loading="lazy" decoding="async" alt="微信交流群二维码">
+<a href="__BASE__/assets/wechat-collatz.jpg?v=__ASSET_VERSION__" target="_blank" rel="noopener">查看原图</a>
+</div>
+<button class="button wechat-toggle" id="wechat-toggle" type="button" aria-expanded="false" aria-controls="wechat-contact-panel">微信交流群</button>
+</aside>
 <div id="toast" class="toast" role="status" hidden></div>
 </body></html>

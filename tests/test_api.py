@@ -1140,3 +1140,15 @@ def test_compact_insight_graph_preserves_links_and_verified_status(client):
     assert nodes[second['id']]['references']==[first['id']]
     assert all('proof' not in x and len(x['claim'])<=400 for x in graph['items'])
     assert client.get('/api/v1/problems/UNKNOWN/insight-graph').status_code==404
+
+
+
+def test_frontend_release_assets_and_wechat_contact(client,monkeypatch):
+    monkeypatch.setenv('APP_RELEASE','a'*40)
+    first=client.get('/').text
+    assert '__ASSET_VERSION__' not in first
+    assert 'id="wechat-toggle"' in first and 'id="wechat-contact-panel" hidden' in first
+    assert 'wechat-collatz.jpg?v=' in first
+    assert client.get('/assets/wechat-collatz.jpg').status_code==200
+    monkeypatch.setenv('APP_RELEASE','b'*40)
+    assert first!=client.get('/').text
