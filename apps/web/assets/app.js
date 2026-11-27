@@ -299,7 +299,7 @@ function changePasswordDialog(){
 }
 
 let promptGeneration=0,promptText='';
-const taskDescriptions={lean_target:['Lean 命题维护','补写或核对命题 · 每批最多 5 条 · 共 8 分'],research_synthesis:['挖掘研究路线','整理成果，定位缺口与下一步'],auto:['动态分配','按当前研究缺口安排任务'],insight_explore:['贡献 Insight','尝试证明，提炼可复用结论'],review:['审核 Insights','每批最多 10 条，独立评价'],lean_work:['Lean 形式化','编写、修复或检查证明']};
+const taskDescriptions={lean_target:['Lean 命题维护','补写或核对命题 · 每批最多 5 条 · 共 8 分'],research_synthesis:['挖掘研究路线','整理成果，定位缺口与下一步'],auto:['动态分配','按当前研究缺口安排任务'],insight_explore:['贡献 Insight','领取后研究至少 3 分钟，提炼更深入的结论'],review:['审核 Insights','每批最多 10 条，独立评价'],lean_work:['Lean 形式化','编写、修复或检查证明']};
 function taskChoices(){
  $('task-choices').innerHTML=Object.entries(taskDescriptions).filter(([key])=>state.platform.phase==='target_backfill'?key==='lean_target':true).map(([key,[title,description]])=>'<button class="task-choice" data-intent="'+key+'" title="'+esc(description)+'" aria-pressed="'+(state.intent===key)+'"><span class="choice-dot" aria-hidden="true"></span><span><strong>'+esc(title)+'</strong><span>'+esc(description)+'</span></span><span class="choice-arrow" aria-hidden="true">↗</span></button>').join('');
  $('task-choices').querySelectorAll('[data-intent]').forEach(b=>b.onclick=()=>selectTaskIntent(b.dataset.intent));

@@ -1,6 +1,23 @@
-import secrets, time
+import secrets, time, math
+from pathlib import Path
 from fastapi import HTTPException
 from apps.api.infrastructure.store import digest
+
+INSIGHT_MIN_SECONDS=180
+
+def check_research_time(tx,body):
+    if INSIGHT_MIN_SECONDS<=0 or body.get('supersedes_id'):return
+    if not body.get('task_id') or not body.get('claim_token'):
+        raise HTTPException(422,'Claim an insight_explore task before submitting a new Insight; research for at least 180 seconds under that lease')
+    t=need(tx,'tasks',body['task_id'])
+    if t['type']!='insight_explore' or t['status']!='claimed' or t.get('expires_at',0)<=time.time():raise HTTPException(409,'Claim an active Insight exploration task')
+    if t.get('contributor_id')!=body['contributor_id'] or t['problem_id']!=body['problem_id'] or not secrets.compare_digest(t.get('claim_hash',''),digest(body['claim_token'])):raise HTTPException(403,'Invalid exploration lease')
+    started=t.get('claimed_at',t['expires_at']-3600)
+    remaining=math.ceil(INSIGHT_MIN_SECONDS-(time.time()-started))
+    if remaining>0:
+        prompt=(Path(__file__).resolve().parents[3]/'prompts/insight_early_submission.md').read_text()
+        raise HTTPException(429,dict(code='research_time_remaining',minimum_research_seconds=INSIGHT_MIN_SECONDS,retry_after_seconds=remaining,message='Continue research on this task before submitting your Insight.',research_prompt=prompt,task_id=t['id']),headers={'Retry-After':str(remaining)})
+
 
 def need(tx, kind, ident):
     value = tx.get(kind, ident)
@@ -61,6 +78,7 @@ def create_content(tx, kind, body):
     if kind!='insights': raise HTTPException(422,'Unsupported content type')
     need(tx,'problems',body['problem_id'])
     check_supersedes(tx,kind,body,body['problem_id'])
+    check_research_time(tx,body)
     previous=need(tx,'insights',body['supersedes_id']) if body.get('supersedes_id') else None
     if previous and bool(previous.get('is_prerequisite'))!=bool(body.get('is_prerequisite')):
         raise HTTPException(422,'Corrections must preserve the original prerequisite/base-credit role')
