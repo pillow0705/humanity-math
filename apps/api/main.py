@@ -379,7 +379,7 @@ def claim(body:Claim):
                 tx.put('target_mode_dispatch',dict(id=t['problem_id'],last_mode=t.get('mode','register')))
             token=secrets.token_urlsafe(32)
             if t['type'] in ('insight_explore',): t['research_direction']=assign_direction(need(tx,'problems',t['problem_id']))
-            t.update(status='claimed',contributor_id=b['contributor_id'],contributor_name=b['contributor_name'],claim_hash=digest(token),expires_at=time.time()+3600,attempts=t['attempts']+1)
+            t.update(status='claimed',contributor_id=b['contributor_id'],contributor_name=b['contributor_name'],claim_hash=digest(token),claimed_at=time.time(),expires_at=time.time()+3600,attempts=t['attempts']+1)
             package=research_package(tx,t); tx.put('tasks',t)
             for target_id in t.get('target_ids',[]) or [t.get('target_id') or t['id']]:
                 note_exposure(tx,'task_claims',target_id)
@@ -396,7 +396,9 @@ def lease_action(id,body,renew):
         if not supported_task(t): raise HTTPException(409,'Unsupported task')
         if t['status']!='claimed' or t['expires_at']<=time.time(): raise HTTPException(409,'Lease expired or inactive')
         if not secrets.compare_digest(t['claim_hash'],digest(body.claim_token)): raise HTTPException(403,'Invalid lease token')
-        if renew: t['expires_at']=time.time()+3600
+        if renew:
+            t.setdefault('claimed_at',t['expires_at']-3600)
+            t['expires_at']=time.time()+3600
         else: t.update(status='available',claim_hash='',expires_at=0)
         tx.put('tasks',t); return public_task(t)
 @app.post('/api/v1/tasks/{id}/renew')
