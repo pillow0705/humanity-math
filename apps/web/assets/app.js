@@ -8,7 +8,7 @@ const labels={lean_target:'补写 Lean 命题（每批 3 条）',research_synthe
 const kinds={lean_target:'补写 Lean 命题',research_synthesis:'研究路线挖掘',insights:'Insight',review:'Review',lean_work:'Lean 工作',solution:'完整证明'};
 const statusNames={legacy_unbound:'历史编译记录 · 未绑定目标',historical_duplicate:'历史重复证明',available:'可领取',claimed:'研究中',submitted:'已提交',queued:'等待验证',running:'验证中',passed:'Lean 验证通过',failed:'验证未通过',open:'研究中',formal_proof_verified:'已结题 · Lean 验证通过',claimed_complete:'附数学证明',partial:'部分证明',conjecture:'待证发现',received:'已收录',verified:'已验证'};
 const verdictNames={support:'支持',concern:'存在疑虑',refute:'反驳',needs_work:'需要完善',pass:'检查通过',fail:'发现问题'};
-let state={platform:{phase:'normal'},problems:[],problem:null,tab:'insights',offset:0,q:'',generation:0,identity:null,score:null,total:0,resultsGeneration:0,rankGeneration:0,rankScope:'problem',intent:'auto'};
+let state={platform:{phase:'normal'},problems:[],problem:null,tab:'insight-ranking',offset:0,q:'',generation:0,identity:null,score:null,total:0,resultsGeneration:0,rankGeneration:0,rankScope:'problem',intent:'auto'};
 let toastTimer,dialogGeneration=0,identityContinuation=null,claimRequest=null;
 try{state.identity=JSON.parse(localStorage.getItem('proof-atlas.identity')||'null');}catch{}
 const shortId=id=>String(id).length>16?String(id).slice(0,10)+'…':id;
@@ -160,7 +160,7 @@ function renderHero(overview){
  $('problem-label').textContent=p.research_policy?.disprove_probability===0?'研究方向 · 证明无理性':'研究方向 · 证明或证伪';
  $('problem-state').textContent=p.resolution==='disproved'?'已证伪 · Lean 验证通过':statusNames[p.status]||p.status;
  $('problem-statement').textContent=problemStatement(p);math($('problem-statement'));$('workspace-start').disabled=p.status!=='open';$('definition-button').disabled=false;
- const s=overview.stats||{};$('stats').innerHTML=[[s.insights,'Insights','insights'],[s.reviews,'有效 Reviews','insights'],[s.verified_lean,'Lean 已通过','lean']].map(([n,t,key])=>'<button class="stat" data-view="'+key+'"><strong>'+esc(n??'—')+'</strong><span>'+t+'</span></button>').join('');
+ const s=overview.stats||{};$('stats').innerHTML=[[s.insights,'Insights','insight-ranking'],[s.reviews,'有效 Reviews','insight-ranking'],[s.verified_lean,'Lean 已通过','lean']].map(([n,t,key])=>'<button class="stat" data-view="'+key+'"><strong>'+esc(n??'—')+'</strong><span>'+t+'</span></button>').join('');
  $('stats').querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>setTab(b.dataset.view));
 }
 function renderLeaderboard(data){
