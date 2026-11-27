@@ -186,7 +186,7 @@ async function refreshActivity(){
   const en=window.UI?.lang==='en';
   $('activity-feed').innerHTML=data.items.length?data.items.map(x=>{
    const p=state.problems.find(p=>p.id===x.problem_id);
-   const action=x.event==='lean_passed'?(en?'Lean proof verified':'Lean 证明通过验证'):(en?'submitted an Insight':'提交了 Insight');
+   const action=({lean_passed:en?'Lean proof verified':'Lean 证明通过验证',lean_target_valid:en?'registered a valid Lean statement':'完成了 Lean 命题补写',insight_score_30:en?'Insight contribution exceeded 30 points':'Insight 贡献分超过 30 分'})[x.event]||(en?'submitted an Insight':'提交了 Insight');
    const date=new Date(x.timestamp*1000);
    return '<article class="activity-item"><div class="activity-meta"><strong>'+esc(x.author_name||'Anonymous')+'</strong><span>'+action+'</span></div><button class="activity-title" data-kind="'+esc(x.kind)+'" data-detail="'+esc(x.object_id)+'">'+esc(x.title)+'</button><div class="activity-time"><span>'+esc(p?problemTitle(p):x.problem_id)+'</span><time datetime="'+date.toISOString()+'">'+esc(date.toLocaleString(en?'en-GB':'zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}))+'</time></div></article>';
   }).join(''):(en?'No activity yet.':'暂无动态');
