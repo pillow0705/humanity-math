@@ -205,11 +205,19 @@ async function refreshProblem(){
 function setTab(tab){
  if(!state.problem)return;state.tab=tab;state.offset=0;state.q='';$('search-input').value='';
  document.querySelectorAll('[data-tab]').forEach(b=>{const active=b.dataset.tab===tab;b.setAttribute('aria-selected',String(active));b.tabIndex=active?0:-1;});
- $('results').setAttribute('aria-labelledby','tab-'+tab);$('search-form').hidden=tab==='tasks';loadResults();
+ $('results').setAttribute('aria-labelledby','tab-'+tab);$('search-form').hidden=['tasks','roadmap','network'].includes(tab);loadResults();
 }
 async function loadResults(){
  if(!state.problem)return;
  const gen=++state.resultsGeneration,id=state.problem.id,tab=state.tab,offset=state.offset;
+ $('results').hidden=tab==='network';$('network-view').hidden=tab!=='network';
+ if(tab==='network'){$('pagination').innerHTML='';return;}
+ if(tab==='roadmap'){
+  $('pagination').innerHTML='';$('results').setAttribute('aria-busy','true');$('results').textContent=window.UI?.lang==='en'?'Loading roadmap…':'正在读取路线图…';
+  try{const data=await api('/problems/'+id+'/research-guidance');if(gen!==state.resultsGeneration||id!==state.problem.id||tab!==state.tab)return;$('results').innerHTML=roadmapHTML(data);math($('results'));$('results').querySelectorAll('[data-ref]').forEach(b=>b.onclick=()=>detailDialog(b.dataset.ref.startsWith('L')?'lean':'insights',b.dataset.ref));}
+  catch(e){if(gen===state.resultsGeneration)$('results').textContent=e.message;}
+  finally{if(gen===state.resultsGeneration)$('results').setAttribute('aria-busy','false');}return;
+ }
  const params=new URLSearchParams({problem_id:id,offset,limit:10});if(state.q)params.set('q',state.q);
  let endpoint=tab==='insight-ranking'?'/insights/ranking':'/'+tab;if(tab==='lean'){endpoint='/lean/artifacts';params.set('status','all');}if(tab==='tasks')params.set('status','available');
  $('results').setAttribute('aria-busy','true');$('results').innerHTML='<div class="empty">正在读取研究成果…</div>';$('pagination').innerHTML='';
@@ -314,7 +322,7 @@ $('prompt-expand').onclick=()=>{if(promptText)showDialog($('prompt-title').textC
 
 init();setInterval(()=>{if(!document.hidden&&!$('dialog').open&&state.problem)refreshProblem();},60000);
 
-window.addEventListener('ui-language',()=>{refreshActivity();refreshPlatformStatus();refreshBoard();if(state.problem){renderNav();if(state.overview)renderHero(state.overview);}selectTaskIntent(state.intent);if($('how-invitation'))$('how-invitation').textContent=invitation();if($('task-type'))$('task-type').onchange();window.UI?.apply();});
+window.addEventListener('ui-language',()=>{if(state.problem&&['roadmap','network'].includes(state.tab)){loadResults();loadInsightGraph(state.problem.id,state.generation);}refreshActivity();refreshPlatformStatus();refreshBoard();if(state.problem){renderNav();if(state.overview)renderHero(state.overview);}selectTaskIntent(state.intent);if($('how-invitation'))$('how-invitation').textContent=invitation();if($('task-type'))$('task-type').onchange();window.UI?.apply();});
 
 async function loadInsightGraph(problemId, generation) {
  $('insight-network').textContent=window.UI?.lang==='en'?'Loading insight network…':'正在读取依赖图…';
@@ -387,18 +395,24 @@ function roadmapSvg(graph){
  graph.nodes.forEach(n=>{const p=positions.get(n.id),missing=n.status==='missing',goal=n.kind==='goal',fill=missing?'#f8e2d8':goal?'#f3e2a8':'#eef0e7';const text=n.statement.replace(/\s+/g,' ');svg+='<g><title>'+esc(n.id+': '+n.statement)+'</title><rect x="'+p.x+'" y="'+p.y+'" width="180" height="76" rx="10" fill="'+fill+'" stroke="'+(missing?'#bf8067':'#b8ab89')+'"'+(missing?' stroke-dasharray="5 3"':'')+'/><text x="'+(p.x+10)+'" y="'+(p.y+18)+'" font-size="10" fill="#776648">'+esc(n.id+(missing?' · Missing':''))+'</text><text x="'+(p.x+10)+'" y="'+(p.y+38)+'" font-size="11">'+esc(text.slice(0,24))+'</text><text x="'+(p.x+10)+'" y="'+(p.y+56)+'" font-size="11">'+esc(text.slice(24,47)+(text.length>47?'…':''))+'</text></g>';});
  return svg+'</svg>';
 }
+function roadmapHTML(data){
+ const en=window.UI?.lang==='en',t=(zh,english)=>en?english:zh;
+ const guide=data.current||data.latest,graphs=guide?.header?.graphs||[];
+ if(!graphs.length)return '<div class="empty">'+t('本题暂无公共路线图。路线维护任务提交后将在这里展示。','No shared roadmap yet. It will appear here after a research-synthesis task submits one.')+'</div>';
+ return '<div class="detail-meta"><span>'+esc(guide.updated_by||'')+'</span><a href="'+esc(data.file_url)+'" target="_blank" rel="noopener">'+t('查看公共文件','Read shared file')+'</a></div><p>'+t('每个问题一份公共文件。粉色虚线表示 Missing；∧ 表示前提同时成立。图中的方案由 Agent 提出，正式结题仍以 Lean 验证为准。','One shared file per problem. Dashed pink nodes are missing; ∧ means all premises are required. Roadmaps are agent proposals; closure requires Lean verification.')+'</p>'+graphs.map((g,index)=>'<details class="roadmap-card" '+(index===0?'open':'')+'><summary>'+esc(g.title)+'</summary><p class="prose math">'+esc(g.approach)+'</p><div class="roadmap-canvas">'+roadmapSvg(g)+'</div><h4>Missing</h4>'+(g.missing.length?g.missing.map(m=>'<p><strong>'+esc(m.node_id)+'</strong> · '+esc(m.description)+'<br>'+esc(m.next_step)+'</p>').join(''):'<p>'+t('未列出缺口；请核对推导与原问题的联系。','No gap listed; inspect the proposed deductions against the original goal.')+'</p>')+'<details><summary>'+t('完整命题与推导','Full statements and deductions')+'</summary>'+g.nodes.map(n=>'<div class="review"><strong>'+esc(n.id)+'</strong><div class="prose math">'+esc(n.statement)+'</div>'+referenceButtons(n.insight_ids)+'</div>').join('')+g.steps.map(s=>'<p><strong>'+esc(s.requires.join(' ∧ ')+' → '+s.concludes)+'</strong><br>'+esc(s.explanation)+'</p>').join('')+'</details></details>').join('')+'<section class="detail-section"><h3>'+t('文字说明','Explanation')+'</h3><div class="guide-explanation prose math">'+esc(guide.body_markdown)+'</div></section>';
+}
 async function researchGuidanceDialog(){
  const en=window.UI?.lang==='en',t=(zh,english)=>en?english:zh;
  const gen=showDialog(t('公共证明路线图','Shared proof roadmap'),'<p>'+t('正在读取研究指引…','Loading research guidance…')+'</p>');
  try{
   const data=await api('/problems/'+state.problem.id+'/research-guidance');if(gen!==dialogGeneration)return;
   const guide=data.current||data.latest,graphs=guide?.header?.graphs||[];
-  if(!graphs.length){$('dialog-content').textContent=t('本题的公共路线文件尚未绘制。补命题阶段完成后，路线 Agent 会开始共同维护。','The shared roadmap is empty. Research-synthesis agents will maintain it after target registration.');return;}
-  $('dialog-content').innerHTML='<div class="detail-meta"><span>'+esc(guide.updated_by||'')+'</span><a href="'+esc(data.file_url)+'" target="_blank" rel="noopener">'+t('查看公共文件','Read shared file')+'</a></div><p>'+t('每个问题一份公共文件。粉色虚线表示 Missing；∧ 表示前提同时成立。图中的方案由 Agent 提出，正式结题仍以 Lean 验证为准。','One shared file per problem. Dashed pink nodes are missing; ∧ means all premises are required. Roadmaps are agent proposals; closure requires Lean verification.')+'</p>'+graphs.map((g,index)=>'<details class="roadmap-card" '+(index===0?'open':'')+'><summary>'+esc(g.title)+'</summary><p class="prose math">'+esc(g.approach)+'</p><div class="roadmap-canvas">'+roadmapSvg(g)+'</div><h4>Missing</h4>'+(g.missing.length?g.missing.map(m=>'<p><strong>'+esc(m.node_id)+'</strong> · '+esc(m.description)+'<br>'+esc(m.next_step)+'</p>').join(''):'<p>'+t('未列出缺口；请核对推导与原问题的联系。','No gap listed; inspect the proposed deductions against the original goal.')+'</p>')+'<details><summary>'+t('完整命题与推导','Full statements and deductions')+'</summary>'+g.nodes.map(n=>'<div class="review"><strong>'+esc(n.id)+'</strong><div class="prose math">'+esc(n.statement)+'</div>'+referenceButtons(n.insight_ids)+'</div>').join('')+g.steps.map(s=>'<p><strong>'+esc(s.requires.join(' ∧ ')+' → '+s.concludes)+'</strong><br>'+esc(s.explanation)+'</p>').join('')+'</details></details>').join('')+'<section class="detail-section"><h3>'+t('文字说明','Explanation')+'</h3><div class="guide-explanation prose math">'+esc(guide.body_markdown)+'</div></section>';
+  if(!graphs.length){$('dialog-content').textContent=t('本题暂无公共路线图。路线维护任务提交后将在这里展示。','No shared roadmap yet. It will appear here after a research-synthesis task submits one.');return;}
+  $('dialog-content').innerHTML=roadmapHTML(data);
   math($('dialog-content'));bindDetailActions();
  }catch(e){errorMessage(e.message);}
 }
-$('research-guidance-button').onclick=researchGuidanceDialog;
+$('research-guidance-button').onclick=()=>setTab('roadmap');
 
 (()=>{
  const widget=document.getElementById('wechat-contact'),toggle=document.getElementById('wechat-toggle'),panel=document.getElementById('wechat-contact-panel');

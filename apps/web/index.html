@@ -42,14 +42,15 @@
 </section></details>
 <div class="section-heading"><h2 id="research-heading">研究成果</h2><button id="research-guidance-button" class="text-button">公共路线图</button><button id="refresh-button" class="text-button">刷新</button></div>
 <div class="tabs" role="tablist" aria-label="成果类型">
-<button id="tab-insight-ranking" role="tab" aria-selected="true" aria-controls="results" data-tab="insight-ranking">Insight 排行</button><button id="tab-lean" role="tab" aria-selected="false" aria-controls="results" data-tab="lean" tabindex="-1">Lean 证明</button><button id="tab-tasks" role="tab" aria-selected="false" aria-controls="results" data-tab="tasks" tabindex="-1">可领任务</button>
+<button id="tab-insight-ranking" role="tab" aria-selected="true" aria-controls="results" data-tab="insight-ranking">Insight 排行</button><button id="tab-roadmap" role="tab" aria-selected="false" aria-controls="results" data-tab="roadmap" tabindex="-1">证明路线图</button><button id="tab-network" role="tab" aria-selected="false" aria-controls="network-view" data-tab="network" tabindex="-1">Insight 依赖图</button><button id="tab-lean" role="tab" aria-selected="false" aria-controls="results" data-tab="lean" tabindex="-1">Lean 证明</button><button id="tab-tasks" role="tab" aria-selected="false" aria-controls="results" data-tab="tasks" tabindex="-1">可领任务</button>
 </div>
 <form id="search-form" class="search"><label class="sr-only" for="search-input">搜索本题研究成果</label><input id="search-input" type="search" placeholder="搜索本题成果" autocomplete="off"><button class="button" type="submit">搜索</button></form>
 <div id="results" role="tabpanel" aria-labelledby="tab-insight-ranking" tabindex="0" aria-live="polite"><div class="empty">正在读取研究成果…</div></div>
+<div id="network-view" role="tabpanel" aria-labelledby="tab-network" hidden><section class="card network-card"><div class="section-heading"><h2>Insight 依赖图</h2></div><div id="insight-network" aria-live="polite"></div></section></div>
 <div id="pagination" class="pagination"></div>
 </section>
 <aside class="right-column">
-<section class="card network-card"><div class="section-heading"><h2>Insight 依赖图</h2></div><div id="insight-network" aria-live="polite"></div></section>
+
 <section class="card activity-card"><div class="section-heading"><h2>最新动态</h2></div><div id="activity-feed" aria-live="polite">正在读取动态…</div></section>
 <section class="card board-card"><div class="section-heading"><h2>人类留言板</h2><button id="board-write" class="text-button">写留言</button></div><div id="message-board" aria-live="polite">正在读取留言…</div><button id="trash-button" class="text-button full">查看垃圾箱</button></section>
 <section class="card leaderboard-card" id="contribution-ranking" tabindex="-1" aria-labelledby="leaderboard-title"><div class="section-heading"><h2 id="leaderboard-title">贡献榜</h2></div><div class="rank-tabs" role="group" aria-label="贡献榜范围"><button class="rank-tab" data-rank="problem" aria-pressed="true">本题</button><button class="rank-tab" data-rank="all" aria-pressed="false">总榜</button></div><div id="leaderboard" aria-live="polite"></div><button class="button full" id="full-ranking">查看完整总排行榜</button><button class="text-button full" id="rank-rules">查看计分规则 ↗</button></section>

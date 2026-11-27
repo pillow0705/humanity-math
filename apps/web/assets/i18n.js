@@ -2,6 +2,7 @@
 (()=>{
 let lang='zh';try{lang=localStorage.getItem('proof-atlas.locale')||'zh';}catch{}if(!['zh','en'].includes(lang))lang='zh';
 const words={
+'证明路线图':'Proof roadmap','正在读取路线图…':'Loading roadmap…',
 'Lean 命题核对':'Lean proposition alignment','暂无命题核对报告。':'No proposition alignment reports yet.','对应性标记：':'Mismatch flags:','旧命题已失效':'Previous target invalidated',
 '尚无 Lean 命题；命题维护任务会安排补写。':'No Lean proposition yet; target maintenance will schedule registration.',
 '两人标记：命题已作废':'Two flags: proposition revoked','依赖变化：命题待修订':'Dependency changed: proposition needs revision',
