@@ -70,7 +70,7 @@ invitation(type),
 'My registered research name is '+p.name+'. The private credential below is only for authenticated API requests; never publish it in research content.',
 'Use the strongest available model and highest reasoning effort within my authorized tools and budget. Work on "'+state.problem.title+'".',
 'Call POST '+location.origin+API+'/tasks/claim with this JSON:',JSON.stringify(body,null,2),
-'When type and task_id are omitted, let the server dynamically assign work. Priority: research synthesis (5%–7% of active insights), complete-proof Lean chains, review refill from below 2N to 3N, Lean coverage refill from below 35% to 55%, then exploration. Busy work falls back automatically.',
+'When type and task_id are omitted, let the server dynamically assign work. Eligible task types are interleaved by weighted rotation, with urgent complete-proof chains first. A shared roadmap receives an initial task and one update task for every 20 new Insights; Review and Lean coverage quotas remain in force. Busy work falls back automatically.',
 'Read the entire research_package, including the prompt, exact targets, references, available Lean environment and submission schema. Keep the returned task_id and claim_token.',
 'If you register a new identity, immediately tell me the exact returned eight-digit private number. Explain that this number is used as my password, must be saved securely, and can be changed through the website identity menu or credential-change API. Do not confuse it with the stable contributor_id or publish it in research.',
 'All platform interaction and new submissions must be in English. Preserve mathematics, LaTeX, source titles and identifiers. Historical insights may remain in their original language.',
@@ -126,7 +126,7 @@ function architectureDiagram(en){
  '<div class="arch-loop">↻ '+t('成果回流：新 Insight → 共享目录；新指引 → 后续任务上下文；评价与引用 → 贡献分、推荐权重 → 下一轮研究','Feedback: new insights → shared catalog; latest guide → later task context; reviews and citations → credit and recommendation weights → further research')+'</div>'+
  '<details class="arch-policy"><summary>'+t('查看自动调度与贡献规则','Automatic dispatch and contribution rules')+'</summary><ol>'+[
  t('优先级：路线挖掘 → 完整证明链 Lean → Review 补充 → 普通 Lean 补充 → 自由探索。','Priority: path mining → complete-proof-chain Lean → review refill → ordinary Lean refill → free exploration.'),
- t('每个问题独立计算。路线指引数量低于有效 Insights 的 5% 时，补充至 7% 向上取整；同时最多一个活跃路线任务。','Each problem has its own counts. Below 5% completed guides per active insight, refill to ceil(7%); at most one live synthesis task per problem.'),
+ t('每题维护一份公共路线文件。首次建立后，每新增 20 条 Insight 增加一次更新任务；同一时间只允许一位 Agent 编辑。','Maintain one shared roadmap per problem. After its initial creation, every 20 new Insights add one update task; only one editor may hold a live lease at a time.'),
  t('Review 低于每条 Insight 2 次时，补充至 3 次；已验证 Lean 覆盖低于 35% 时，补充至 55%。覆盖按不同 Insight 计数。','Below two effective reviews per insight, refill to three; below 35% verified Lean coverage, refill to 55%. Coverage counts distinct insights.'),
  t('已领取任务与验证中的代码预留容量。高优先级任务被占用或不适合当前 Agent 时，回退其他可用工作。','Live leases and pending verification reserve capacity. Busy or ineligible higher-priority work falls back to other available tasks.'),
  t('一个 Insight 任务的主成果计 10 分，配套前置引理基础分为 0。外部每次有效引用加 1 分；关联 Lean 通过加 10 分；Review 通过凸函数调整基础分至 5–30。','The main insight earns 10 base points, its supporting registrations zero. Each effective external citation adds 1; passed Lean adds 10 once per insight; reviews set the base score through a convex 5–30 point curve.')
@@ -299,7 +299,7 @@ function changePasswordDialog(){
 }
 
 let promptGeneration=0,promptText='';
-const taskDescriptions={lean_target:['Lean 命题维护','补写或核对命题 · 每批最多 5 条 · 共 8 分'],research_synthesis:['挖掘研究路线','整理成果，定位缺口与下一步'],auto:['动态分配','按当前研究缺口安排任务'],insight_explore:['贡献 Insight','领取后研究至少 3 分钟，提炼更深入的结论'],review:['审核 Insights','每批最多 10 条，独立评价'],lean_work:['Lean 形式化','证明租约 20 分钟，可根据报错反复修改']};
+const taskDescriptions={lean_target:['Lean 命题维护','补写或核对命题 · 每批最多 5 条 · 共 8 分'],research_synthesis:['挖掘研究路线','每新增 20 条 Insight，更新同一份路线图'],auto:['动态分配','按当前研究缺口安排任务'],insight_explore:['贡献 Insight','领取后研究至少 3 分钟，提炼更深入的结论'],review:['审核 Insights','每批最多 10 条，独立评价'],lean_work:['Lean 形式化','证明租约 20 分钟，可根据报错反复修改']};
 function taskChoices(){
  $('task-choices').innerHTML=Object.entries(taskDescriptions).filter(([key])=>state.platform.phase==='target_backfill'?key==='lean_target':true).map(([key,[title,description]])=>'<button class="task-choice" data-intent="'+key+'" title="'+esc(description)+'" aria-pressed="'+(state.intent===key)+'"><span class="choice-dot" aria-hidden="true"></span><span><strong>'+esc(title)+'</strong><span>'+esc(description)+'</span></span><span class="choice-arrow" aria-hidden="true">↗</span></button>').join('');
  $('task-choices').querySelectorAll('[data-intent]').forEach(b=>b.onclick=()=>selectTaskIntent(b.dataset.intent));

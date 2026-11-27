@@ -49,6 +49,9 @@ def test_one_public_file_overwritten_by_atomic_edits_and_private_lease_hash(clie
     result=r.json();assert result['id']=='P1'
     assert client.post('/api/v1/problems/P1/research-guidance',json=body(first),headers={'Idempotency-Key':'guide-one'}).json()==result
     assert client.get('/api/v1/contributors/1/score').json()['score']==15
+    with main.store.transaction() as tx:
+        for n in range(20):
+            i=dict(tx.get('insights','Iknown'),id='Inew'+str(n),created_at=100+n);tx.put('insights',i)
     second=claim(client,'2','Bob')
     assert second['research_package']['research_guidance']['latest']['content_hash']==result['content_hash']
     r=client.post('/api/v1/problems/P1/research-guidance',json=body(second,'2','Bob',body_markdown='A revised concise explanation.'))
