@@ -996,7 +996,7 @@ def test_activity_excludes_reviews_failures_and_private_fields(client):
         for ident,status,stamp in [('Vpass','passed',2000000000),('Vfail','failed',2000000001)]:
             tx.put('verifications',dict(id=ident,artifact_id='L'+ident,status=status,policy=POLICY,finished_at=stamp,target_matched=True,target_hash=tx.get('insight_targets',first['id'])['target_hash']))
             tx.put('lean_artifacts',dict(id='L'+ident,insight_id=first['id'],problem_id='P001',verification_id=ident,policy=POLICY,target=tx.get('insight_targets',first['id']),library_id=LIBRARY_ID,created_at=1,contributor_name='Alice',contributor_password='private',contributor_id='1'))
-        tx.put('reviews',dict(id='Ractivity',created_at=2000000002,insight_id=first['id']))
+        tx.put('reviews',dict(id='Ractivity',created_at=2000000002,target_id=first['id'],contributor_id='unregistered',score=4))
     items=client.get('/api/v1/activity').json()['items']
     assert items[0]['event']=='lean_passed' and items[0]['timestamp']==2000000000
     assert len(items)==3
@@ -1228,3 +1228,34 @@ def test_insight_ranking_excludes_replaced_withdrawn_and_includes_lean_bonus(cli
     assert data['items'][0]['evaluation']['contribution_points']==20
     html=client.get('/').text
     assert 'data-tab="insight-ranking"' in html and 'id="tab-insight-ranking"' in html
+
+
+def test_activity_target_completion_and_one_score_milestone(client):
+    item=client.post('/api/v1/insights',json=insight()).json()
+    with main.store.transaction() as tx:
+        tx.put('contributors',dict(id='2',name='Formalizer'))
+        target=tx.get('insight_targets',item['id'])
+        target.update(migration_batch_id='Bnews',registered_by='2',finished_at=2000000000)
+        tx.put('insight_targets',target)
+        for n in range(21):
+            tx.put('insights',dict(id='Icite'+str(n),problem_id='P001',title='Lemma',created_at=1,contributor_id='2',references=[item['id']]))
+    events=client.get('/api/v1/activity?limit=50').json()['items']
+    target_event=next(e for e in events if e['event']=='lean_target_valid')
+    assert target_event['author_name']=='Formalizer' and target_event['kind']=='insights'
+    milestone=next(e for e in events if e['event']=='insight_score_30')
+    assert milestone['object_id']==item['id']
+    again=client.get('/api/v1/activity?limit=50').json()['items']
+    assert [e for e in again if e['event']=='insight_score_30']==[milestone]
+    with main.store.transaction() as tx:
+        assert len(tx.all('activity_milestones'))==1
+        from apps.api.infrastructure.store import digest
+        tx.put('submission_states',dict(id=digest(['insights',item['id']]),object_id=item['id'],withdrawn=True))
+    assert not any(e['object_id']==item['id'] for e in client.get('/api/v1/activity?limit=50').json()['items'])
+
+
+def test_activity_score_exactly_thirty_has_no_milestone(client):
+    item=client.post('/api/v1/insights',json=insight()).json()
+    with main.store.transaction() as tx:
+        for n in range(20):
+            tx.put('insights',dict(id='Icite'+str(n),problem_id='P001',title='Lemma',created_at=1,contributor_id='2',references=[item['id']]))
+    assert not any(e['event']=='insight_score_30' for e in client.get('/api/v1/activity?limit=50').json()['items'])
