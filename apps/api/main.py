@@ -4,7 +4,7 @@ from fastapi import FastAPI, HTTPException, Request, Query
 from fastapi.responses import PlainTextResponse, Response, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from apps.api.infrastructure.store import Store, digest
-from apps.api.models import Insight, Review, ReviewBatch, Claim, Lease, Artifact, Audit, Solution, ContributorClaim, ContributorAction, CredentialLogin, CredentialChange, ResearchPlan
+from apps.api.models import Insight, Review, ReviewBatch, Claim, Lease, Artifact, Audit, Solution, ContributorClaim, ContributorAction, CredentialLogin, CredentialChange, ResearchPlan, LeanTargetRegistration
 from apps.api.modules.core import need, find_content, public_task, create_content, clean, finish_task, contribute, check_supersedes, supported_task
 from apps.api.modules.lean import create_artifact, closure, environment, artifact_summary, MATHLIB_REVISION, bundle_manifest
 
@@ -18,6 +18,7 @@ from apps.api.modules.exploration import ensure_exploration
 from apps.api.modules.scheduling import sync_schedule, dispatch_priority
 from apps.api.modules.management import submissions as owned_submissions, submission as owned_submission, ranked
 from apps.api.modules.lifecycle import state as submission_state, withdrawn, change as change_submission
+from apps.api.modules.targets import get_target, register_target, validate_review_alignment, target_source, target_proof_matches
 
 BASE=Path(__file__).resolve().parents[2]
 REGISTRATION_CREDENTIALS=True
@@ -87,6 +88,7 @@ def research_package(tx,t):
         for ref in item.get('references',[]):
             if ref.startswith('I') and ref not in seen:
                 obj=find_content(tx,ref); seen.add(ref); materials.append(obj); queue.append(obj)
+    materials=[dict(x,lean_target=get_target(tx,x['id'])) if x['id'].startswith('I') else x for x in materials]
     reviews=[x for x in tx.all('reviews') if x['target_id'] in seen]
     endpoint={'insight_explore':'/insights','review':'/reviews/batch','research_synthesis':'/research-plans','lean_work':f"/lean/artifacts/{t.get('target_id')}/audits" if t.get('mode')=='audit' else '/lean/artifacts'}[t['type']]
     schemas={'insight_explore':'Insight','review':'ReviewBatch','research_synthesis':'ResearchPlan','lean_work':'Audit' if t.get('mode')=='audit' else 'Artifact'}
@@ -110,6 +112,7 @@ def research_package(tx,t):
     if t['type']=='research_synthesis':
         submission_schema['properties']['paths']['items']=copy.deepcopy(app.openapi()['components']['schemas']['ResearchPath'])
     if t['type']=='insight_explore':
+        submission_schema['properties']['lean_target']=copy.deepcopy(app.openapi()['components']['schemas']['LeanTarget'])
         field=submission_schema['properties']['claims_problem_solved']
         field.update(enum=research_policy(problem)['allowed_completion_claims'],minimum=min(research_policy(problem)['allowed_completion_claims']))
     from apps.api.modules.synthesis import active_plans,catalog
@@ -117,7 +120,7 @@ def research_package(tx,t):
     guidance=dict(latest=plans[-1] if plans else None,detail_url=PREFIX+'/api/v1/problems/'+problem['id']+'/research-guidance')
     synthesis_catalog=catalog(tx,problem['id'],PREFIX) if t['type']=='research_synthesis' else None
     insight_catalog=recommend(tx,problem['id'],PREFIX,surface='task_packages',sample_size=EXPLORATION_CATALOG_SIZE if t['type']=='insight_explore' else CATALOG_SIZE)
-    return dict(research_guidance=guidance,synthesis_catalog=synthesis_catalog,collaboration_language='en',submission_language='en',historical_content_policy='Historical research remains in its original language. Submit all new explanatory prose in English; preserve mathematical notation, identifiers and original source titles.',research_policy=research_policy(problem),research_direction=t.get('research_direction'),completion_context=candidate_context,final_check_context=final_check,insight_catalog=insight_catalog,review_targets=[dict(insight_id=i,detail_url=PREFIX+'/api/v1/insights/'+i) for i in t.get('target_ids',[])],alternative_submission=alternative,repair_context=repair,problem=problem,goal=t.get('goal') or f"{t['type']} for {t.get('target_id') or problem['id']}",materials=materials,reviews=reviews,lean_environment=environment(PREFIX),lean_artifacts=code,prompt=prompt_for(t),submission=dict(method='POST',url=PREFIX+'/api/v1'+endpoint,schema=submission_schema,include_fields=['contributor_id','contributor_name','contributor_password','task_id','claim_token']))
+    return dict(lean_target=get_target(tx,target.get('insight_id',target['id'])) if t['type']=='lean_work' and target else None,research_guidance=guidance,synthesis_catalog=synthesis_catalog,collaboration_language='en',submission_language='en',historical_content_policy='Historical research remains in its original language. Submit all new explanatory prose in English; preserve mathematical notation, identifiers and original source titles.',research_policy=research_policy(problem),research_direction=t.get('research_direction'),completion_context=candidate_context,final_check_context=final_check,insight_catalog=insight_catalog,review_targets=[dict(insight_id=i,detail_url=PREFIX+'/api/v1/insights/'+i) for i in t.get('target_ids',[])],alternative_submission=alternative,repair_context=repair,problem=problem,goal=t.get('goal') or f"{t['type']} for {t.get('target_id') or problem['id']}",materials=materials,reviews=reviews,lean_environment=environment(PREFIX),lean_artifacts=code,prompt=prompt_for(t),submission=dict(method='POST',url=PREFIX+'/api/v1'+endpoint,schema=submission_schema,include_fields=['contributor_id','contributor_name','contributor_password','task_id','claim_token']))
 
 @app.get('/',response_class=HTMLResponse)
 def homepage():
@@ -232,10 +235,10 @@ def overview(id:str):
         dispatch=sync_schedule(tx,id).get(id)
         scores=Scores(tx)
         insights=[x for x in tx.all('insights') if x['problem_id']==id and x['id'] not in scores.withdrawn|scores.superseded]
-        artifacts=[x for x in tx.all('lean_artifacts') if x['problem_id']==id and not withdrawn(tx,'lean_artifacts',x['id'])]
-        verifications={x['id']:x for x in tx.all('verifications')}
+        from apps.api.modules.lean import canonical_proof_ids
+        verified=canonical_proof_ids(tx)
         available=sum(supported_task(t) and t['problem_id']==id and (t['status']=='available' or (t['status']=='claimed' and t.get('expires_at',0)<=time.time())) for t in tx.all('tasks'))
-        return dict(problem=describe_problem(p),stats=dict(insights=len(insights),reviews=dispatch['reviews'] if dispatch else sum(scores.evaluation(i,'insights')['effective_reviews'] for i in insights),verified_lean=dispatch['verified_insights'] if dispatch else len({x['insight_id'] for x in artifacts if verifications[x['verification_id']]['status']=='passed'}),available_tasks=available))
+        return dict(problem=describe_problem(p),stats=dict(insights=len(insights),reviews=dispatch['reviews'] if dispatch else sum(scores.evaluation(i,'insights')['effective_reviews'] for i in insights),verified_lean=dispatch['verified_insights'] if dispatch else sum(i['id'] in verified for i in insights),available_tasks=available))
 
 @app.get('/health')
 def health(): return dict(status='ok',storage='files',release=os.environ.get('APP_RELEASE','development'))
@@ -352,6 +355,8 @@ def post_insight(body:Insight,request:Request):
     if not b.get('is_prerequisite'): b.pop('is_prerequisite',None)
     def op(tx):
         obj=create_content(tx,'insights',b)
+        obj['lean_target']=register_target(tx,obj,b['lean_target'])
+        tx.put('insights',obj)
         if b.get('lean'):
             payload=dict(b['lean'],insight_id=obj['id'],contributor_id=b['contributor_id'],contributor_name=b['contributor_name'],task_id=None,claim_token=None,supersedes_id=None)
             artifact=create_artifact(tx,payload)
@@ -368,7 +373,7 @@ def list_content(kind,problem_id,q,offset,limit,include_withdrawn=False):
         items.sort(key=lambda x:x['created_at'],reverse=True)
         scores=Scores(tx)
         result=page(items,offset,limit)
-        result['items']=[dict(x,withdrawal=submission_state(tx,kind,x['id']),evaluation=scores.evaluation(x,kind)) for x in result['items']]
+        result['items']=[dict(x,lean_target=get_target(tx,x['id']),withdrawal=submission_state(tx,kind,x['id']),evaluation=scores.evaluation(x,kind)) for x in result['items']]
         return result
 
 @app.get('/api/v1/insights')
@@ -393,6 +398,7 @@ def content(kind,id):
         obj['evaluation']=Scores(tx).evaluation(obj,kind)
         obj['replaced_by']=[x['id'] for x in tx.all(kind) if x.get('supersedes_id')==id]
         if kind=='insights':
+            obj['lean_target']=get_target(tx,id)
             obj['claims_problem_solved']=obj.get('claims_problem_solved',0)
             obj['completion']=tx.get('proof_candidates',id)
             from apps.api.modules.lean import canonical_proof_ids
@@ -409,6 +415,23 @@ def dependencies(kind,id):
         obj=need(tx,kind,id)
         return dict(references=obj['references'],referenced_by=[x['id'] for k in ('insights',) for x in tx.all(k) if id in x['references']])
 
+@app.get('/api/v1/insights/{id}/lean-target')
+def insight_lean_target(id:str):
+    with store.transaction() as tx:
+        need(tx,'insights',id)
+        return get_target(tx,id)
+
+@app.post('/api/v1/insights/{id}/lean-target')
+def register_insight_lean_target(id:str,body:LeanTargetRegistration,request:Request):
+    b=body.model_dump()
+    def op(tx):
+        obj=need(tx,'insights',id)
+        if obj['contributor_id']!=b['contributor_id']:
+            raise HTTPException(403,'Only the insight author may register its Lean target')
+        check_supersedes(tx,'insights',b,obj['problem_id'])
+        return register_target(tx,obj,b['lean_target'])
+    return submit(request,b,op)
+
 @app.get('/api/v1/insights/{id}/dependencies')
 def insight_deps(id:str): return dependencies('insights',id)
 
@@ -416,6 +439,7 @@ def post_review(kind,id,body,request):
     b=body.model_dump()
     def op(tx):
         obj=need(tx,kind,id); check_supersedes(tx,'reviews',b,obj['problem_id'])
+        validate_review_alignment(tx,id,b)
         r=tx.new('reviews','E',dict(clean(b),target_id=id,target_kind=kind,problem_id=obj['problem_id']))
         finish_task(tx,b,'review',id,obj['problem_id'],r['id']); contribute(tx,r,'review'); return r
     return submit(request,b,op)
@@ -468,13 +492,20 @@ def bundle(id:str):
     with store.transaction() as tx: artifacts=closure(tx,need(tx,'lean_artifacts',id))
     buf=io.BytesIO()
     with zipfile.ZipFile(buf,'w',zipfile.ZIP_DEFLATED) as z:
+        written_targets=set()
         for a in artifacts:
             imports='\n'.join('import MC.'+i for i in a['dependencies'])
+            target=a.get('target')
+            if target:
+                imports+='\nimport '+target['target_module']
+                if target['target_hash'] not in written_targets:
+                    z.writestr(target['target_module'].replace('.','/')+'.lean',target_source(target))
+                    written_targets.add(target['target_hash'])
             z.writestr(a['file_path'],imports+'\n'+a['source'])
         z.writestr('lean-toolchain','leanprover/lean4:v4.19.0\n')
-        z.writestr('lakefile.toml','name = "research"\nversion = "0.1.0"\n[[require]]\nname = "mathlib"\ngit = "https://github.com/leanprover-community/mathlib4"\nrev = "'+MATHLIB_REVISION+'"\n[[lean_lib]]\nname = "MC"\n')
+        z.writestr('lakefile.toml','name = "research"\nversion = "0.1.0"\n[[require]]\nname = "mathlib"\ngit = "https://github.com/leanprover-community/mathlib4"\nrev = "'+MATHLIB_REVISION+'"\n[[lean_lib]]\nname = "MC"\n[[lean_lib]]\nname = "MCTargets"\n')
         z.writestr('lake-manifest.json',json.dumps(bundle_manifest(),indent=2))
-        z.writestr('manifest.json',json.dumps([dict(id=a['id'],content_hash=a['content_hash'],dependencies=a['dependencies'],theorem=a['theorem'],toolchain=a['toolchain'],policy=a['policy'],library_id=a.get('library_id')) for a in artifacts],indent=2))
+        z.writestr('manifest.json',json.dumps([dict(id=a['id'],content_hash=a['content_hash'],dependencies=a['dependencies'],theorem=a['theorem'],toolchain=a['toolchain'],policy=a['policy'],library_id=a.get('library_id'),target_hash=(a.get('target') or {}).get('target_hash')) for a in artifacts],indent=2))
         z.writestr('README.md','This archive contains proof source and dependency sources for inspection. Do not install Lean, elan, Lake or Mathlib on the user computer for this task. Submit only new source, the entry theorem and dependency IDs through the API; the server assembles dependencies and performs compilation and verification. Artifact IDs name the modules. Import them and reference their declared theorem names.\n')
     return Response(buf.getvalue(),media_type='application/zip',headers={'Content-Disposition':f'attachment; filename="{id}.zip"'})
 @app.get('/api/v1/lean/verifications/{id}')
@@ -501,7 +532,8 @@ def post_solution(id:str,body:Solution,request:Request):
         a=need(tx,'lean_artifacts',b['artifact_id'])
         if a['problem_id']!=id: raise HTTPException(422,'Artifact belongs to a different problem')
         if not p.get('lean_target') or p.get('target_status')!='reviewed': raise HTTPException(409,'Problem has no reviewed, fixed Lean target yet; completion cannot be certified')
-        if need(tx,'verifications',a['verification_id'])['status']!='passed': raise HTTPException(422,'Artifact must pass verification first')
+        if not target_proof_matches(a,need(tx,'verifications',a['verification_id']),get_target(tx,a['insight_id'])):
+            raise HTTPException(422,'Artifact must prove its registered immutable Lean target before final verification')
         check_supersedes(tx,'solutions',b,id)
         r=tx.new('solutions','S',dict(clean(b),problem_id=id,status='queued',target_hash=digest(final_target(p,b['claims_problem_solved']))))
         contribute(tx,r,'solution'); return r

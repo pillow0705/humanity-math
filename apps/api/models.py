@@ -17,7 +17,14 @@ class InlineLean(Strict):
     dependencies: list[str] = Field(default_factory=list,max_length=50)
     toolchain: Literal['leanprover/lean4:v4.19.0'] = 'leanprover/lean4:v4.19.0'
 
+class LeanTarget(Strict):
+    definitions: str = Field(default='',max_length=50000,description='Ordinary Lean definitions/imports needed to state the fixed proposition; no proof placeholders or new axioms')
+    expression: str = Field(min_length=1,max_length=20000,description='A complete Lean proposition, including all intended quantifiers and hypotheses; not a theorem declaration or proof')
+    dependencies: list[str] = Field(default_factory=list,max_length=50,description='Previously verified artifact IDs needed by the proposition; frozen when registered')
+
 class Insight(Submission):
+    lean_target: LeanTarget
+
     is_prerequisite: bool = Field(default=False,strict=True,description='True only for a supporting lemma registered for the current exploration task: no separate insight base points; it does not complete the task')
     claims_problem_solved: int = Field(default=0,ge=-1,le=1,strict=True,description='Completion claim only: 0 for all intermediate insights; 1 for a complete proof of the original problem P; -1 for a complete proof of its negation. Independent of assigned research direction; not verification.')
     lean: InlineLean | None = None
@@ -35,11 +42,16 @@ class Insight(Submission):
         if self.claims_problem_solved!=0 and (self.proof_status!='claimed_complete' or self.gaps):
             raise ValueError('A problem-completion claim requires claimed_complete and no declared gaps')
         return self
+TargetAlignment = Literal['aligned','misaligned','uncertain','not_applicable']
 class Review(Submission):
+    target_alignment: TargetAlignment = Field(default='not_applicable',description='Required for an insight with a registered Lean target: does it faithfully express the mathematical claim?')
+    target_hash: str | None = Field(default=None,pattern=r'^[0-9a-f]{64}$',description='Optional expected immutable target hash; the server records the actual hash with the review')
     verdict: Literal['support','concern','refute','needs_work']
     rationale: str = Field(min_length=1, max_length=30000)
     score: int = Field(ge=1, le=5, strict=True, description='Integer rating from 1 (lowest) to 5 (highest); not a proof certificate')
 class ReviewItem(Strict):
+    target_alignment: TargetAlignment = 'not_applicable'
+    target_hash: str | None = Field(default=None,pattern=r'^[0-9a-f]{64}$')
     insight_id: str = Field(pattern=r'^I[A-Za-z0-9_-]{1,99}$')
     verdict: Literal['support','concern','refute','needs_work']
     rationale: str = Field(min_length=1,max_length=30000)
@@ -120,3 +132,7 @@ class ResearchPlan(Submission):
     paths: list[ResearchPath] = Field(min_length=1,max_length=30)
     task_id: str
     claim_token: str
+
+
+class LeanTargetRegistration(ContributorAction):
+    lean_target: LeanTarget

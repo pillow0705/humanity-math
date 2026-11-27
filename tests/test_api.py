@@ -12,13 +12,31 @@ def client(tmp_path,monkeypatch):
     with store.transaction() as tx:
         tx.put('problems',dict(id='P001',title='Test',statement='True',lean_target=None,status='open',created_at=time.time()))
         task(tx,'P001','insight_explore')
-    with TestClient(main.app) as c:
+    class FixtureClient(TestClient):
+        def post(self,*args,**kwargs):
+            response=super().post(*args,**kwargs)
+            # These API-only tests use the proposition True. Kernel elaboration is
+            # exercised independently by target-verifier and real Lean tests.
+            with store.transaction() as tx:
+                for target in tx.all('insight_targets'):
+                    if target['status']=='queued':
+                        target['status']='valid';tx.put('insight_targets',target)
+            return response
+    with FixtureClient(main.app) as c:
         for name in ['Alice','Aster','Bob','Beta']:
             assert c.post('/api/v1/contributors/claim',json={'name':name}).status_code==200
         yield c
 
+def put_test_verification(tx,v):
+    """Stand in for a successful exact-target kernel check in API-only tests."""
+    if v.get('status')=='passed':
+        a=tx.get('lean_artifacts',v.get('artifact_id','missing'))
+        if a and a.get('target'):
+            v.update(target_hash=a['target']['target_hash'],target_matched=True)
+    tx.put('verifications',v)
+
 def route(): return dict(contributor_id='1',contributor_name='Alice',problem_id='P001',title='Route',summary='Short',body='Detailed argument',references=[])
-def insight(): return dict(contributor_id='1',contributor_name='Alice',problem_id='P001',title='True',claim='True',proof='By introduction',proof_status='claimed_complete',gaps=[],references=[])
+def insight(): return dict(lean_target=dict(expression='True'),contributor_id='1',contributor_name='Alice',problem_id='P001',title='True',claim='True',proof='By introduction',proof_status='claimed_complete',gaps=[],references=[])
 
 def test_package_and_submission(client):
     claim=client.post('/api/v1/tasks/claim',json=dict(contributor_id='1',contributor_name='Alice',type='insight_explore')).json()
@@ -52,7 +70,7 @@ def test_references_replacement_and_review(client):
     assert client.post('/api/v1/insights',json=dict(insight(),references=['missing'])).status_code==422
     new=client.post('/api/v1/insights',json=dict(insight(),proof='Different proof',supersedes_id=i['id'])).json()
     assert client.get('/api/v1/insights/'+i['id']).json()['replaced_by']==[new['id']]
-    r=client.post('/api/v1/insights/'+i['id']+'/reviews',json=dict(contributor_id='4',contributor_name='Beta',verdict='support',rationale='Checked claim',score=4))
+    r=client.post('/api/v1/insights/'+i['id']+'/reviews',json=dict(contributor_id='4',contributor_name='Beta',verdict='support',rationale='Checked claim',target_alignment='aligned',score=4))
     assert r.status_code==200
     assert len(client.get('/api/v1/insights/'+i['id']+'/reviews').json()['items'])==1
     assert client.patch('/api/v1/insights/'+i['id'],json={}).status_code==405
@@ -94,16 +112,16 @@ def test_review_score_contract(client):
     body=dict(contributor_id='4',contributor_name='Beta',verdict='support',rationale='Evidence-based rating')
     assert client.post(url,json=body).status_code==422
     for bad in [0,6,2.5,4.0,"4",True,None]:
-        assert client.post(url,json=dict(body,score=bad)).status_code==422
-    assert client.post(url,json=dict(body,score=4,suggestions='removed')).status_code==422
+        assert client.post(url,json=dict(body,target_alignment='aligned',score=bad)).status_code==422
+    assert client.post(url,json=dict(body,target_alignment='aligned',score=4,suggestions='removed')).status_code==422
     for value in [1,5]:
-        response=client.post(url,json=dict(body,score=value))
+        response=client.post(url,json=dict(body,target_alignment='aligned',score=value))
         assert response.status_code==200,response.text
         assert type(response.json()['score']) is int
     stored=client.get(url).json()['items']
     assert sorted(x['score'] for x in stored)==[1,5]
     assert all('suggestions' not in x for x in stored)
-    assert client.post('/api/v1/routes/RBASE/reviews',json=dict(body,score=3)).status_code==404
+    assert client.post('/api/v1/routes/RBASE/reviews',json=dict(body,target_alignment='aligned',score=3)).status_code==404
 
 
 def test_lean_environment_and_catalog(client):
@@ -121,7 +139,7 @@ def test_lean_environment_and_catalog(client):
     with main.store.transaction() as tx:
         v=tx.get('verifications',a['verification_id'])
         v.update(status='passed',axioms=[],theorem_signature='identity_result : True')
-        tx.put('verifications',v)
+        put_test_verification(tx,v)
     results=client.get('/api/v1/lean/artifacts',params={'q':'identity_result','problem_id':'P001','insight_id':i['id']}).json()
     entry=results['items'][0]
     assert entry['reusable'] and entry['import_statement']=='import MC.'+a['id']
@@ -167,16 +185,16 @@ def test_scoring_citations_lean_and_final_use(client):
     ev=lambda: client.get('/api/v1/insights/'+i['id']).json()['evaluation']
     assert ev()['citation_points']==1
     for rating in [5,1]:
-        response=client.post('/api/v1/insights/'+i['id']+'/reviews',json=dict(contributor_id='4',contributor_name='Beta',verdict='concern',score=rating,rationale='Review'))
+        response=client.post('/api/v1/insights/'+i['id']+'/reviews',json=dict(contributor_id='4',contributor_name='Beta',verdict='concern',target_alignment='aligned',score=rating,rationale='Review'))
         assert response.status_code==200
     assert ev()['effective_reviews']==1 and ev()['contribution_points']==10.5
     assert client.get('/api/v1/contributors/4/score').json()['score']==6
-    client.post('/api/v1/insights/'+i['id']+'/reviews',json=dict(contributor_id='2',contributor_name='Aster',verdict='support',score=5,rationale='Self'))
+    client.post('/api/v1/insights/'+i['id']+'/reviews',json=dict(contributor_id='2',contributor_name='Aster',verdict='support',target_alignment='aligned',score=5,rationale='Self'))
     assert ev()['effective_reviews']==1
     a=client.post('/api/v1/lean/artifacts',json=dict(contributor_id='4',contributor_name='Beta',insight_id=i['id'],source='theorem t : True := True.intro',theorem='t')).json()
     assert client.get('/api/v1/contributors/4/score').json()['pending_points']==8
     with main.store.transaction() as tx:
-        v=tx.get('verifications',a['verification_id']);v['status']='passed';tx.put('verifications',v)
+        v=tx.get('verifications',a['verification_id']);v['status']='passed';put_test_verification(tx,v)
         tx.new('solutions','S',dict(problem_id='P001',status='verified',used_insight_ids=[i['id']],contributor_id='4'))
     assert ev()['lean_bonus']==10 and ev()['final_proof_bonus']==3
     assert ev()['contribution_points']==23.5
@@ -206,7 +224,7 @@ def test_fair_recommendations_and_low_scores(client,monkeypatch):
     targets=[client.post('/api/v1/insights',json=dict(insight(),title=str(n))).json() for n in range(300)]
     low=targets[0]
     for person,name in [('2','Aster'),('3','Bob'),('4','Beta')]:
-        client.post('/api/v1/insights/'+low['id']+'/reviews',json=dict(contributor_id=person,contributor_name=name,verdict='concern',rationale='Low rating',score=1))
+        client.post('/api/v1/insights/'+low['id']+'/reviews',json=dict(contributor_id=person,contributor_name=name,verdict='concern',rationale='Low rating',target_alignment='aligned',score=1))
     result=client.get('/api/v1/problems/P001/recommendations').json()
     assert len(result['items'])==300 and {x['id'] for x in result['items']}=={x['id'] for x in targets}
     for n in range(300,400): targets.append(client.post('/api/v1/insights',json=dict(insight(),title=str(n))).json())
@@ -292,7 +310,7 @@ def test_quality_and_citations_increase_exposure_and_task_priority(client):
     targets={name:client.post('/api/v1/insights',json=dict(insight(),title=name)).json() for name in ['high','cited','neutral','low']}
     for name,rating in [('high',5),('low',1)]:
         for number,person in [('2','Aster'),('3','Bob'),('4','Beta')]:
-            r=client.post('/api/v1/insights/'+targets[name]['id']+'/reviews',json=dict(contributor_id=number,contributor_name=person,verdict='support' if rating==5 else 'concern',rationale='Evidence',score=rating))
+            r=client.post('/api/v1/insights/'+targets[name]['id']+'/reviews',json=dict(contributor_id=number,contributor_name=person,verdict='support' if rating==5 else 'concern',rationale='Evidence',target_alignment='aligned',score=rating))
             assert r.status_code==200
     for n in range(3):
         r=client.post('/api/v1/insights',json=dict(insight(),title='Citation '+str(n),references=[targets['cited']['id']]))
@@ -406,7 +424,7 @@ def test_withdrawing_candidate_cancels_inflight_final_close(client,monkeypatch):
     i=client.post('/api/v1/insights',json=dict(insight(),claims_problem_solved=1)).json()
     a=client.post('/api/v1/lean/artifacts',json=dict(contributor_id='1',contributor_name='Alice',insight_id=i['id'],source='theorem final1 : True := True.intro',theorem='final1')).json()
     monkeypatch.setattr(worker,'STORE',main.store)
-    monkeypatch.setattr(worker,'verify_artifact',lambda *args:dict(status='passed',axioms=[]))
+    monkeypatch.setattr(worker,'verify_artifact',lambda a,*args:dict(status='passed',axioms=[],target_matched=True,target_hash=a['target']['target_hash']))
     assert worker.once()
     url='/api/v1/contributors/1/submissions/insights/'+i['id']+'/withdraw'
     def cancel_final(*args):
@@ -477,12 +495,12 @@ def test_three_problem_migration_archives_without_deleting(client):
     identity=dict(contributor_id='1',contributor_name='Alice')
     assert client.post('/api/v1/tasks/claim',json=dict(identity,problem_id='P001')).status_code==409
     assert client.post('/api/v1/insights',json=dict(insight(),title='Archived write')).status_code==409
-    assert client.post('/api/v1/insights/'+legacy['id']+'/reviews',json=dict(identity,score=3,verdict='support',rationale='Review')).status_code==409
+    assert client.post('/api/v1/insights/'+legacy['id']+'/reviews',json=dict(identity,target_alignment='aligned',score=3,verdict='support',rationale='Review')).status_code==409
     assert client.post('/api/v1/lean/artifacts',json=dict(identity,insight_id=legacy['id'],source='theorem archived : True := True.intro',theorem='archived')).status_code==409
     for pid in ['P007','P009','P003']:
         overview=client.get('/api/v1/problems/'+pid+'/overview').json()
         assert 'routes' not in overview['stats'] and overview['stats']['insights']==1
-        assert overview['stats']['available_tasks']==4
+        assert overview['stats']['available_tasks']==3  # Legacy seed has no immutable target yet.
         claimed=client.post('/api/v1/tasks/claim',json=dict(identity,problem_id=pid,type='insight_explore'))
         assert claimed.status_code==200,claimed.text
         assert claimed.json()['research_package']['problem']['id']==pid
@@ -554,7 +572,7 @@ def make_review_batch(client,count,person='2',name='Aster'):
     assert response.status_code==200,response.text
     claim=response.json()
     body=dict(contributor_id=person,contributor_name=name,task_id=claim['task']['id'],claim_token=claim['claim_token'],
-              reviews=[dict(insight_id=i,verdict='support',rationale='Checked the exact claim and proof',score=4) for i in claim['task']['target_ids']])
+              reviews=[dict(insight_id=i,verdict='support',rationale='Checked the exact claim and proof',target_alignment='aligned',score=4) for i in claim['task']['target_ids']])
     return claim,body
 
 
@@ -568,13 +586,13 @@ def test_review_batch_ten_atomic_individual_scores_and_idempotency(client):
     assert pkg['submission']['schema']['properties']['reviews']['items']['properties']['score']['type']=='integer'
     before=client.get('/api/v1/contributors/2/score').json()['score']
     for reviews in [body['reviews'][:-1],body['reviews']+[body['reviews'][0]],
-                    [dict(x,score=4.0) if n==9 else x for n,x in enumerate(body['reviews'])],
+                    [dict(x,target_alignment='aligned',score=4.0) if n==9 else x for n,x in enumerate(body['reviews'])],
                     [dict(x,insight_id='Iunknown') if n==9 else x for n,x in enumerate(body['reviews'])]]:
         assert client.post('/api/v1/reviews/batch',json=dict(body,reviews=reviews)).status_code==422
     assert all(client.get('/api/v1/insights/'+i+'/reviews').json()['items']==[] for i in targets)
     assert client.get('/api/v1/contributors/2/score').json()['score']==before
     assert client.post('/api/v1/reviews/batch',json=dict(body,claim_token='wrong')).status_code==403
-    single=dict(contributor_id='2',contributor_name='Aster',task_id=body['task_id'],claim_token=body['claim_token'],score=4,verdict='support',rationale='Only one')
+    single=dict(contributor_id='2',contributor_name='Aster',task_id=body['task_id'],claim_token=body['claim_token'],target_alignment='aligned',score=4,verdict='support',rationale='Only one')
     assert client.post('/api/v1/insights/'+targets[0]+'/reviews',json=single).status_code==409
     response=client.post('/api/v1/reviews/batch',json=body,headers={'Idempotency-Key':'batch'})
     assert response.status_code==200,response.text
@@ -852,7 +870,7 @@ def dispatch_claim(client,person='2',name='Aster',**extra):
 
 def submit_dispatch_reviews(client,c):
     t=c['task']
-    r=client.post('/api/v1/reviews/batch',json=dict(contributor_id=t['contributor_id'],contributor_name=t['contributor_name'],task_id=t['id'],claim_token=c['claim_token'],reviews=[dict(insight_id=i,verdict='support',rationale='Checked independently',score=4) for i in t['target_ids']]))
+    r=client.post('/api/v1/reviews/batch',json=dict(contributor_id=t['contributor_id'],contributor_name=t['contributor_name'],task_id=t['id'],claim_token=c['claim_token'],reviews=[dict(insight_id=i,verdict='support',rationale='Checked independently',target_alignment='aligned',score=4) for i in t['target_ids']]))
     assert r.status_code==200,r.text
 
 def dispatch_metrics(client):
@@ -909,7 +927,7 @@ def test_dynamic_lean_hysteresis_pending_verification_and_completion(client):
         a=client.post('/api/v1/lean/artifacts',json=dict(contributor_id='1',contributor_name='Alice',task_id=c['task']['id'],claim_token=c['claim_token'],insight_id=c['task']['target_id'],source='theorem cover : True := True.intro',theorem='cover')).json()
         assert dispatch_metrics(client)['lean_reserved']>=1
         with main.store.transaction() as tx:
-            v=tx.get('verifications',a['verification_id']);v.update(status='passed',policy=POLICY);tx.put('verifications',v)
+            v=tx.get('verifications',a['verification_id']);v.update(status='passed',policy=POLICY);put_test_verification(tx,v)
         state=dispatch_metrics(client)
         assert state['verified_insights']==index+1
         assert state['lean_refill']==(index<5)
@@ -934,7 +952,7 @@ def test_review_assignment_prefers_low_coverage_and_limits_last_batch(client):
     for person,name in [('2','Aster'),('3','Bob'),('4','Beta')]:
         for index,target in enumerate(targets):
             if person=='4' and index==2:continue
-            assert client.post('/api/v1/insights/'+target['id']+'/reviews',json=dict(contributor_id=person,contributor_name=name,score=4,verdict='support',rationale='Independent assessment')).status_code==200
+            assert client.post('/api/v1/insights/'+target['id']+'/reviews',json=dict(contributor_id=person,contributor_name=name,target_alignment='aligned',score=4,verdict='support',rationale='Independent assessment')).status_code==200
     state=dispatch_metrics(client);assert state['reviews']==8 and state['review_room']==1 and state['review_refill']
     assert dispatch_claim(client)['task']['type']=='research_synthesis'
     claimed=dispatch_claim(client,'4','Beta')
@@ -947,7 +965,7 @@ def test_review_assignment_prefers_low_coverage_and_limits_last_batch(client):
 def test_review_prefers_fewer_scores_and_avoids_prior_reviewer(client):
     targets=[client.post('/api/v1/insights',json=dict(insight(),title='Priority '+str(n))).json() for n in range(3)]
     for index,person,name in [(0,'2','Aster'),(0,'3','Bob'),(1,'3','Bob')]:
-        client.post('/api/v1/insights/'+targets[index]['id']+'/reviews',json=dict(contributor_id=person,contributor_name=name,score=4,verdict='support',rationale='Reviewed'))
+        client.post('/api/v1/insights/'+targets[index]['id']+'/reviews',json=dict(contributor_id=person,contributor_name=name,target_alignment='aligned',score=4,verdict='support',rationale='Reviewed'))
     assert dispatch_claim(client)['task']['type']=='research_synthesis'
     claimed=dispatch_claim(client)
     assert claimed['task']['target_ids']==[targets[2]['id'],targets[1]['id']]
@@ -963,7 +981,7 @@ def test_lean_35_55_threshold_boundaries(n,passed,previous,expected,target):
         def put(self,*args):pass
     insights={str(i):dict(id=str(i),problem_id='P001',contributor_id='1') for i in range(n)}
     artifacts={str(i):dict(id=str(i),insight_id=str(i),verification_id=str(i),library_id=LIBRARY_ID) for i in range(passed)}
-    scores=SimpleNamespace(objects={'insights':insights,'lean_artifacts':artifacts},withdrawn=set(),superseded=set(),latest_reviews={},verifications={str(i):dict(status='passed',policy=POLICY) for i in range(passed)})
+    scores=SimpleNamespace(objects={'insights':insights,'lean_artifacts':artifacts},withdrawn=set(),superseded=set(),latest_reviews={},verified_insights=set(map(str,range(passed))),verifications={str(i):dict(status='passed',policy=POLICY) for i in range(passed)})
     state,*_=snapshot(Tx(),'P001',scores)
     assert state['lean_refill']==expected
     assert state['lean_target']==target
@@ -976,8 +994,8 @@ def test_activity_excludes_reviews_failures_and_private_fields(client):
     second=client.post('/api/v1/insights',json=dict(insight(),title='Newest result')).json()
     with main.store.transaction() as tx:
         for ident,status,stamp in [('Vpass','passed',2000000000),('Vfail','failed',2000000001)]:
-            tx.put('verifications',dict(id=ident,artifact_id='L'+ident,status=status,policy=POLICY,finished_at=stamp))
-            tx.put('lean_artifacts',dict(id='L'+ident,insight_id=first['id'],problem_id='P001',verification_id=ident,library_id=LIBRARY_ID,created_at=1,contributor_name='Alice',contributor_password='private',contributor_id='1'))
+            tx.put('verifications',dict(id=ident,artifact_id='L'+ident,status=status,policy=POLICY,finished_at=stamp,target_matched=True,target_hash=tx.get('insight_targets',first['id'])['target_hash']))
+            tx.put('lean_artifacts',dict(id='L'+ident,insight_id=first['id'],problem_id='P001',verification_id=ident,policy=POLICY,target=tx.get('insight_targets',first['id']),library_id=LIBRARY_ID,created_at=1,contributor_name='Alice',contributor_password='private',contributor_id='1'))
         tx.put('reviews',dict(id='Ractivity',created_at=2000000002,insight_id=first['id']))
     items=client.get('/api/v1/activity').json()['items']
     assert items[0]['event']=='lean_passed' and items[0]['timestamp']==2000000000
@@ -1046,7 +1064,7 @@ def test_passed_insight_rejects_more_code_and_closes_lean_leases(client):
     body=dict(contributor_id='2',contributor_name='Aster',insight_id=i['id'],source='theorem first : True := True.intro',theorem='first')
     a=client.post('/api/v1/lean/artifacts',json=body).json()
     with main.store.transaction() as tx:
-        v=tx.get('verifications',a['verification_id']);v.update(status='passed',finished_at=10);tx.put('verifications',v)
+        v=tx.get('verifications',a['verification_id']);v.update(status='passed',finished_at=10);put_test_verification(tx,v)
         t=task(tx,'P001','lean_work',i['id'],mode='repair')
         t.update(status='claimed',expires_at=time.time()+3600,claim_hash='reserved',contributor_id='3');tx.put('tasks',t)
     response=client.post('/api/v1/lean/artifacts',json=dict(body,source='theorem second : True := True.intro',theorem='second'))
@@ -1069,7 +1087,7 @@ def test_concurrent_and_historical_lean_proofs_reward_only_first_success(client)
         assert r.status_code==200;artifacts.append(r.json())
     with main.store.transaction() as tx:
         for index,a in enumerate(artifacts):
-            v=tx.get('verifications',a['verification_id']);v.update(status='passed',finished_at=10+index);tx.put('verifications',v)
+            v=tx.get('verifications',a['verification_id']);v.update(status='passed',finished_at=10+index);put_test_verification(tx,v)
         scores=Scores(tx)
         assert scores.total('2')['by_kind']['lean_work']==8
         assert scores.total('3')['by_kind']['lean_work']==0
@@ -1083,7 +1101,7 @@ def test_lean_repairs_remain_available_after_failure(client):
     body=dict(contributor_id='2',contributor_name='Aster',insight_id=i['id'],source='theorem first : True := True.intro',theorem='first')
     a=client.post('/api/v1/lean/artifacts',json=body).json()
     with main.store.transaction() as tx:
-        v=tx.get('verifications',a['verification_id']);v['status']='failed';tx.put('verifications',v)
+        v=tx.get('verifications',a['verification_id']);v['status']='failed';put_test_verification(tx,v)
     assert client.post('/api/v1/lean/artifacts',json=dict(body,source='theorem repaired : True := True.intro',theorem='repaired')).status_code==200
 
 
@@ -1095,7 +1113,7 @@ def test_canonical_proof_catalog_counts_and_legacy_modules(client):
         assert response.status_code==200;artifacts.append(response.json())
     with main.store.transaction() as tx:
         for n,a in enumerate(artifacts):
-            v=tx.get('verifications',a['verification_id']);v.update(status='passed',finished_at=10+n);tx.put('verifications',v)
+            v=tx.get('verifications',a['verification_id']);v.update(status='passed',finished_at=10+n);put_test_verification(tx,v)
     catalog=client.get('/api/v1/lean/artifacts').json()
     assert catalog['total']==1 and catalog['items'][0]['id']==artifacts[0]['id']
     assert client.get('/api/v1/problems/P001/overview').json()['stats']['verified_lean']==1
@@ -1119,7 +1137,7 @@ def test_worker_cancels_queued_duplicate_without_compiling(client,monkeypatch):
     for n in range(2):
         artifacts.append(client.post('/api/v1/lean/artifacts',json=dict(contributor_id='2',contributor_name='Aster',insight_id=i['id'],source=f'theorem entry{n} : True := True.intro',theorem=f'entry{n}')).json())
     with main.store.transaction() as tx:
-        v=tx.get('verifications',artifacts[0]['verification_id']);v.update(status='passed',finished_at=10);tx.put('verifications',v)
+        v=tx.get('verifications',artifacts[0]['verification_id']);v.update(status='passed',finished_at=10);put_test_verification(tx,v)
     monkeypatch.setattr(worker,'STORE',main.store)
     def unexpected(*args):raise AssertionError('Duplicate proof must not be compiled')
     monkeypatch.setattr(worker,'verify_artifact',unexpected)
@@ -1132,7 +1150,7 @@ def test_compact_insight_graph_preserves_links_and_verified_status(client):
     second=client.post('/api/v1/insights',json=dict(insight(),title='Second',references=[first['id']])).json()
     a=client.post('/api/v1/lean/artifacts',json=dict(contributor_id='2',contributor_name='Aster',insight_id=first['id'],source='theorem result : True := True.intro',theorem='result')).json()
     with main.store.transaction() as tx:
-        v=tx.get('verifications',a['verification_id']);v['status']='passed';tx.put('verifications',v)
+        v=tx.get('verifications',a['verification_id']);v['status']='passed';put_test_verification(tx,v)
     graph=client.get('/api/v1/problems/P001/insight-graph').json()
     assert graph['total']==2
     nodes={x['id']:x for x in graph['items']}
@@ -1181,7 +1199,7 @@ def test_insight_ranking_scores_search_and_pagination(client):
     first=client.post('/api/v1/insights',json=dict(insight(),title='Referenced result')).json()
     second=client.post('/api/v1/insights',json=dict(insight(),title='Reviewed result')).json()
     third=client.post('/api/v1/insights',json=dict(insight(),title='Citing result',references=[first['id']])).json()
-    assert client.post('/api/v1/insights/'+second['id']+'/reviews',json=dict(contributor_id='4',contributor_name='Beta',verdict='support',rationale='Checked the proof',score=5)).status_code==200
+    assert client.post('/api/v1/insights/'+second['id']+'/reviews',json=dict(contributor_id='4',contributor_name='Beta',verdict='support',rationale='Checked the proof',target_alignment='aligned',score=5)).status_code==200
     data=client.get('/api/v1/insights/ranking?problem_id=P001&limit=2').json()
     assert data['total']==3
     assert [x['id'] for x in data['items']]==[first['id'],second['id']]
@@ -1201,8 +1219,10 @@ def test_insight_ranking_excludes_replaced_withdrawn_and_includes_lean_bonus(cli
     hidden=client.post('/api/v1/insights',json=dict(insight(),title='Withdrawn result')).json()
     assert client.post('/api/v1/contributors/1/submissions/insights/'+hidden['id']+'/withdraw',json=dict(contributor_id='1',contributor_name='Alice')).status_code==200
     with main.store.transaction() as tx:
-        tx.put('lean_artifacts',dict(id='L-ranking',insight_id=replacement['id'],verification_id='V-ranking',contributor_id='2',created_at=1))
-        tx.put('verifications',dict(id='V-ranking',artifact_id='L-ranking',status='passed',created_at=1))
+        from apps.api.modules.lean import POLICY,LIBRARY_ID
+        target=tx.get('insight_targets',replacement['id'])
+        tx.put('lean_artifacts',dict(id='L-ranking',insight_id=replacement['id'],verification_id='V-ranking',contributor_id='2',created_at=1,target=target,policy=POLICY,library_id=LIBRARY_ID))
+        tx.put('verifications',dict(id='V-ranking',artifact_id='L-ranking',status='passed',created_at=1,policy=POLICY,target_hash=target['target_hash'],target_matched=True))
     data=client.get('/api/v1/insights/ranking?problem_id=P001').json()
     assert data['total']==1 and data['items'][0]['id']==replacement['id']
     assert data['items'][0]['evaluation']['contribution_points']==20

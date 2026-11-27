@@ -8,6 +8,7 @@ from apps.api.modules.core import need, task
 from apps.api.modules.completion import sync_candidates, priority_targets, close_problem
 from apps.api.modules.lifecycle import withdrawn
 from apps.api.modules.research import final_target
+from apps.api.modules.targets import target_source
 
 ROOT=Path(__file__).resolve().parents[2]
 STORE=Store()
@@ -51,13 +52,30 @@ def sandbox(work,command,writable=False):
 def cache_files(a): return CACHE/a['content_hash']
 def file_hash(p): return hashlib.sha256(p.read_bytes()).hexdigest()
 
+def target_cache_files(target): return CACHE/'targets'/target['target_hash']
+
+def prepare_target(work,target):
+    cached=target_cache_files(target)
+    meta=json.loads((cached/'manifest.json').read_text())
+    if (meta.get('target_hash')!=target['target_hash'] or meta.get('policy')!=POLICY
+            or meta.get('toolchain')!=TOOLCHAIN or meta.get('library_id')!=LIBRARY_ID):
+        raise RuntimeError('Fixed target cache identity mismatch')
+    if file_hash(cached/'module.olean')!=meta['olean_hash']: raise RuntimeError('Fixed target cache corruption')
+    current_image=docker(['image','inspect','--format','{{.Id}}',IMAGE]).stdout.strip()
+    if current_image!=meta['image']: raise RuntimeError('Fixed target was checked in a different sandbox image')
+    destination=work/(target['target_module'].replace('.','/')+'.olean')
+    destination.parent.mkdir(parents=True,exist_ok=True)
+    shutil.copyfile(cached/'module.olean',destination);os.chmod(destination,0o444)
+
 def prepare(work,arts):
     (work/'MC').mkdir(parents=True,exist_ok=True)
     for a in arts:
+        if a.get('target'): prepare_target(work,a['target'])
         cached=cache_files(a)
         meta=json.loads((cached/'manifest.json').read_text())
         if meta['policy']!=POLICY or meta['content_hash']!=a['content_hash']: raise RuntimeError('Dependency cache identity mismatch')
         if meta.get('library_id')!=LIBRARY_ID: raise RuntimeError('Dependency Mathlib environment mismatch')
+        if a.get('target') and (meta.get('target_hash')!=a['target']['target_hash'] or meta.get('target_matched') is not True): raise RuntimeError('Dependency fixed-target attestation mismatch')
         if file_hash(cached/'module.olean')!=meta['olean_hash']: raise RuntimeError('Dependency cache corruption')
         current_image=docker(['image','inspect','--format','{{.Id}}',IMAGE]).stdout.strip()
         if current_image!=meta['image']: raise RuntimeError('Dependency was built in a different sandbox image')
@@ -72,18 +90,54 @@ def parse_axioms(text):
     if set(axioms)-ALLOWED_AXIOMS: raise RuntimeError('Disallowed transitive axioms: '+str(axioms))
     return axioms
 
+def verify_target(target,arts):
+    work=Path(tempfile.mkdtemp(prefix='target-',dir=STORE.root/'artifacts'));os.chmod(work,0o777)
+    try:
+        prepare(work,arts)
+        relative=target['target_module'].replace('.','/')+'.lean'
+        path=work/relative;path.parent.mkdir(parents=True,exist_ok=True);os.chmod(path.parent,0o777)
+        source=target_source(target);path.write_text(source)
+        code,log,image=sandbox(work,['/opt/lean/bin/lean','-j','1','-o',relative.replace('.lean','.olean'),relative],True)
+        if code: return dict(status='invalid',log=log,exit_code=code)
+        checker=('import Lean\nimport '+target['target_module']+'\n'
+                 +'run_cmd do\n  let info ← Lean.getConstInfo `'+target['target_constant']+'\n  unless info.levelParams.isEmpty do throwError \"Fixed Insight target must be closed over universe levels\"\n'
+                 +'def MCVerifiedResult : Prop := @_root_.'+target['target_constant']+'\n#print axioms MCVerifiedResult\n')
+        (work/'Check.lean').write_text(checker)
+        code,checklog,_=sandbox(work,['/opt/lean/bin/lean','-j','1','Check.lean'])
+        if code: return dict(status='invalid',log=log+'\n'+checklog,exit_code=code)
+        axioms=parse_axioms(checklog)
+        cached=target_cache_files(target);cached.mkdir(parents=True,exist_ok=True)
+        shutil.copyfile(path.with_suffix('.olean'),cached/'module.olean')
+        manifest=dict(target_hash=target['target_hash'],policy=POLICY,toolchain=TOOLCHAIN,library_id=LIBRARY_ID,image=image,olean_hash=file_hash(cached/'module.olean'),axioms=axioms)
+        atomic(cached/'manifest.json',manifest);(cached/'source.lean').write_text(source)
+        return dict(status='valid',log=log+'\n'+checklog,axioms=axioms,cache=manifest)
+    finally:shutil.rmtree(work,ignore_errors=True)
+
+def proof_checker(a):
+    target=a['target']
+    return (f'import Lean\nimport {target["target_module"]}\nimport MC.{a["id"]}\n'
+            +'run_cmd Lean.Elab.Command.liftTermElabM do\n'
+            +f'  let e ← Lean.Meta.mkConstWithFreshMVarLevels `{a["theorem"]}\n'
+            +'  let t ← Lean.Meta.inferType e\n'
+            +'  unless (← Lean.Meta.isProp t) do throwError "Selected declaration is not a proof"\n'
+            +f'  let expected := Lean.mkConst `{target["target_constant"]}\n'
+            +'  unless (← Lean.Meta.isDefEq t expected) do throwError "Proof does not match the fixed Insight target"\n'
+            +f'def MCVerifiedResult : _root_.{target["target_constant"]} := @_root_.{a["theorem"]}\n'
+            +'#print axioms MCVerifiedResult\n'+f'#check @_root_.{a["theorem"]}\n')
+
 def verify_artifact(a,arts):
+    if not a.get('target') or a.get('target_hash')!=a['target'].get('target_hash'): return dict(status='failed',log='Missing or inconsistent fixed Insight target')
     work=Path(tempfile.mkdtemp(prefix='verify-',dir=STORE.root/'artifacts'))
     os.chmod(work,0o777)
     try:
-        prepare(work,arts[:-1]); os.chmod(work/'MC',0o777)
+        prepare(work,arts[:-1]); prepare_target(work,a['target']); os.chmod(work/'MC',0o777)
         # Protect the dependency directory; root worker owns all files except generated output.
-        source='\n'.join('import MC.'+d for d in a['dependencies'])+'\n'+a['source']
+        source='import '+a['target']['target_module']+'\n'+'\n'.join('import MC.'+d for d in a['dependencies'])+'\n'+a['source']
         (work/a['file_path']).write_text(source)
         code,log,image=sandbox(work,['/opt/lean/bin/lean','-j','1','-o',a['file_path'].replace('.lean','.olean'),a['file_path']],True)
         if code: return dict(status='failed',log=log,exit_code=code)
         # Fresh process, read-only mount: submission cannot edit the trusted checker.
-        (work/'Check.lean').write_text(f'import Lean\nimport MC.{a["id"]}\nrun_cmd Lean.Elab.Command.liftTermElabM do\n  let e ← Lean.Elab.Term.elabTerm (← `({a["theorem"]})) none\n  let t ← Lean.Meta.inferType e\n  unless (← Lean.Meta.isProp t) do throwError "Selected declaration is not a proof"\ndef MCVerifiedResult := @{a["theorem"]}\n#print axioms MCVerifiedResult\n#check @{a["theorem"]}\n')
+        (work/'Check.lean').write_text(proof_checker(a))
         code,checklog,_=sandbox(work,['/opt/lean/bin/lean','-j','1','Check.lean'])
         if code: return dict(status='failed',log=log+'\n'+checklog,exit_code=code)
         axioms=parse_axioms(checklog)
@@ -91,10 +145,10 @@ def verify_artifact(a,arts):
         target=work/a['file_path'].replace('.lean','.olean')
         if target.is_symlink() or not target.is_file(): raise RuntimeError('Invalid compiler artifact')
         shutil.copyfile(target,cached/'module.olean')
-        manifest=dict(content_hash=a['content_hash'],policy=POLICY,toolchain=a['toolchain'],library_id=LIBRARY_ID,image=image,olean_hash=file_hash(cached/'module.olean'),axioms=axioms)
+        manifest=dict(content_hash=a['content_hash'],policy=POLICY,toolchain=a['toolchain'],library_id=LIBRARY_ID,image=image,olean_hash=file_hash(cached/'module.olean'),axioms=axioms,target_hash=a['target_hash'],target_matched=True)
         atomic(cached/'manifest.json',manifest)
         signature=re.search(r'(?m)^'+re.escape(a['theorem'])+r'\s*:.*',checklog,re.S)
-        return dict(status='passed',theorem_signature=signature.group(0).strip() if signature else None,axioms=axioms,log=log+'\n'+checklog,cache=manifest,semantic_alignment='not_reviewed',reused_dependencies=[x['id'] for x in arts[:-1]])
+        return dict(status='passed',target_hash=a['target_hash'],target_matched=True,theorem_signature=signature.group(0).strip() if signature else None,axioms=axioms,log=log+'\n'+checklog,cache=manifest,semantic_alignment='not_reviewed',reused_dependencies=[x['id'] for x in arts[:-1]])
     finally: shutil.rmtree(work,ignore_errors=True)
 
 def verify_solution(s,p,a,arts):
@@ -114,7 +168,29 @@ def verify_solution(s,p,a,arts):
         return dict(status='verified',used_artifact_ids=[x['id'] for x in used_artifacts],used_insight_ids=sorted({x['insight_id'] for x in used_artifacts}),log=log,axioms=axioms,target_hash=digest(target),dependency_snapshot=[dict(id=x['id'],content_hash=x['content_hash']) for x in arts],image=image,verified_at=time.time())
     finally: shutil.rmtree(work,ignore_errors=True)
 
+def check_next_target():
+    with STORE.transaction() as tx:
+        queued=[x for x in tx.all('insight_targets') if x['status']=='queued']
+        if not queued:return False
+        target=min(queued,key=lambda x:(x.get('created_at',0),x['id']))
+        target.update(status='checking',started_at=time.time());tx.put('insight_targets',target)
+    try:
+        arts={}
+        with STORE.transaction() as tx:
+            for snapshot in target.get('dependency_snapshot',[]):
+                artifact=need(tx,'lean_artifacts',snapshot['id'])
+                if artifact['content_hash']!=snapshot['content_hash']:raise RuntimeError('Fixed target dependency changed')
+                for a in closure(tx,artifact):arts[a['id']]=a
+        result=verify_target(target,list(arts.values()))
+    except Exception as exc:result=dict(status='invalid',log=str(exc)[-10000:])
+    with STORE.transaction() as tx:
+        current=need(tx,'insight_targets',target['id'])
+        if current['target_hash']!=target['target_hash']:raise RuntimeError('Immutable Insight target changed during checking')
+        current.update(result,finished_at=time.time());tx.put('insight_targets',current)
+    return True
+
 def once():
+    if check_next_target():return True
     with STORE.transaction() as tx:
         sync_candidates(tx)
         candidates=[x for x in tx.all('solutions') if x['status']=='queued']
@@ -137,9 +213,10 @@ def once():
                 ident=need(tx,'lean_artifacts',v['artifact_id'])['insight_id']
                 return (0,-priorities[ident],v['created_at']) if ident in priorities else (1,0,v['created_at'])
             v=min(candidates,key=order); v.update(status='running',started_at=time.time()); tx.put('verifications',v)
-            a=need(tx,'lean_artifacts',v['artifact_id']); arts=closure(tx,a); kind='verification'
+            a=need(tx,'lean_artifacts',v['artifact_id']); arts=closure(tx,a); target=tx.get('insight_targets',a['insight_id']); kind='verification'
     try:
         if kind=='solution' and (p.get('status')=='archived' or p.get('target_status')!='reviewed' or digest(final_target(p,v.get('claims_problem_solved',1)))!=v.get('target_hash')): raise RuntimeError('Final verification requires the unchanged reviewed target')
+        if kind=='verification' and (not target or target.get('status')!='valid' or target.get('target_hash')!=a.get('target_hash')): raise RuntimeError('The immutable Insight target must be valid and match this proof snapshot')
         result=verify_artifact(a,arts) if kind=='verification' else verify_solution(v,p,a,arts)
     except Exception as exc: result=dict(status='failed',log=str(exc)[-10000:])
     with STORE.transaction() as tx:
@@ -151,6 +228,11 @@ def once():
             current_problem=need(tx,'problems',v['problem_id'])
             if current_problem.get('status')=='archived' or current_problem.get('target_status')!='reviewed' or digest(final_target(current_problem,v.get('claims_problem_solved',1)))!=v['target_hash']:
                 result=dict(status='failed',log='Reviewed target changed during verification')
+        if kind=='verification' and result['status']=='passed':
+            current_target=tx.get('insight_targets',a['insight_id'])
+            if (not current_target or current_target.get('status')!='valid' or current_target.get('target_hash')!=a.get('target_hash')
+                    or result.get('target_hash')!=a.get('target_hash') or result.get('target_matched') is not True):
+                result=dict(status='failed',log='Missing target attestation or fixed Insight target changed during proof verification')
         v.update(result,finished_at=time.time()); tx.put('verifications' if kind=='verification' else 'solutions',v)
         if kind=='verification' and a['insight_id'] in priority_targets(tx) and result['status']=='passed': task(tx,a['problem_id'],'lean_work',a['id'],mode='audit')
         if kind=='verification' and a['insight_id'] in priority_targets(tx) and result['status']=='failed':
@@ -168,11 +250,13 @@ def main():
     with open(STORE.root/'.worker.lock','a') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         with STORE.transaction() as tx:
+            for target in tx.all('insight_targets'):
+                if target['status']=='checking':target['status']='queued';tx.put('insight_targets',target)
             for kind in ('verifications','solutions'):
                 for v in tx.all(kind):
                     if v['status']=='running': v['status']='queued'; tx.put(kind,v)
         previous=None; checked=0
-        watched=('insights','lean_artifacts','verifications','solutions','problems','submission_states','tasks')
+        watched=('insight_targets','insights','lean_artifacts','verifications','solutions','problems','submission_states','tasks')
         def revision():
             result=[]
             for kind in watched:

@@ -27,6 +27,8 @@ def bundle_manifest():
 
 def canonical_proof_ids(tx):
     """One active proof per insight; historical modules remain importable by old chains."""
+    from apps.api.modules.targets import target_proof_matches
+    targets={t['insight_id']:t for t in tx.all('insight_targets')}
     artifacts=tx.all('lean_artifacts')
     verifications={v['id']:v for v in tx.all('verifications')}
     withdrawn_ids={s['object_id'] for s in tx.all('submission_states') if s.get('withdrawn')}
@@ -40,18 +42,21 @@ def canonical_proof_ids(tx):
     for a in sorted(artifacts,key=lambda a:(first_success.get(a['id'],float('inf')),a['created_at'],a['id'])):
         v=verifications.get(a['verification_id'],{})
         if (a['id'] not in withdrawn_ids|superseded and v.get('status')=='passed'
-                and v.get('policy')==POLICY and a.get('library_id')==LIBRARY_ID):
+                and target_proof_matches(a,v,targets.get(a['insight_id']))):
             result.setdefault(a['insight_id'],a['id'])
     return result
 
 def create_artifact(tx, body):
     insight = need(tx,'insights',body['insight_id'])
+    from apps.api.modules.targets import get_target, target_proof_matches
+    target=get_target(tx,insight['id'])
+    if not target: raise HTTPException(409,'This insight needs an immutable Lean target before proof submission; its author must register the target first')
+    if target['status']=='invalid': raise HTTPException(409,'The frozen Lean target is invalid; submit a corrected replacement insight before proving it')
     check_supersedes(tx,'lean_artifacts',body,insight['problem_id'])
     for existing in tx.all('lean_artifacts'):
         if existing['insight_id'] != insight['id']: continue
         verification = need(tx,'verifications',existing['verification_id'])
-        if (verification['status'] == 'passed' and verification.get('policy') == POLICY
-                and existing.get('library_id') == LIBRARY_ID):
+        if target_proof_matches(existing,verification,target):
             raise HTTPException(409,dict(message='This insight already has a verified Lean proof. Reuse it or submit an audit; duplicate formalization is not accepted.',existing_id=existing['id']))
     if len(set(body['dependencies'])) != len(body['dependencies']): raise HTTPException(422,'Duplicate dependencies')
     deps = [need(tx,'lean_artifacts',i) for i in body['dependencies']]
@@ -61,20 +66,12 @@ def create_artifact(tx, body):
             raise HTTPException(409,dict(message='Use the canonical proof for this insight; the requested module is a historical duplicate.',existing_id=canonical[dep['insight_id']]))
         v = need(tx,'verifications',dep['verification_id'])
         if v['status'] != 'passed' or v['policy'] != POLICY: raise HTTPException(422,'Dependencies must pass the current verification policy')
-    # Phase one accepts proof-language modules, not build scripts or metaprogram extensions.
-    # Actual theorem checking is still done by Lean; this narrows the execution interface.
     source = body['source']
-    if re.search(r'\b(sorry|admit|axiom|unsafe|initialize|builtin_initialize|run_tac|run_elab|run_cmd|run_meta|run_io|elab|macro|syntax|extern|implemented_by|native_decide|skipKernelTC)\b|#|\x00', source):
-        raise HTTPException(422,'Unsupported metaprogramming, unproved axiom or placeholder; submit ordinary Lean definitions and proofs')
-    allowed = {'MC.'+d['id'] for d in deps}
-    for line in source.splitlines():
-        if re.match(r'^\s*import\b',line):
-            imports = line.strip().split()[1:]
-            if not imports or any(x not in allowed and not library_import(x) for x in imports): raise HTTPException(422,'Use installed Init/Std/Mathlib/Batteries/Aesop/Qq modules or declared verified MC dependencies')
-    key = digest(dict(source=source,theorem=body['theorem'],dependencies=[d['content_hash'] for d in deps],toolchain=TOOLCHAIN,policy=POLICY,library_id=LIBRARY_ID))
+    validate_source(source,deps)
+    key = digest(dict(target_hash=target['target_hash'],source=source,theorem=body['theorem'],dependencies=[d['content_hash'] for d in deps],toolchain=TOOLCHAIN,policy=POLICY,library_id=LIBRARY_ID))
     for old in tx.all('lean_artifacts'):
         if old['content_hash']==key and old['insight_id']==body['insight_id']: raise HTTPException(409,dict(message='Duplicate code',existing_id=old['id']))
-    obj = tx.new('lean_artifacts','L',dict(clean(body),problem_id=insight['problem_id'],content_hash=key,policy=POLICY,library_id=LIBRARY_ID))
+    obj = tx.new('lean_artifacts','L',dict(clean(body),problem_id=insight['problem_id'],target_hash=target['target_hash'],target={k:v for k,v in target.items() if k not in ('log','started_at','finished_at')},content_hash=key,policy=POLICY,library_id=LIBRARY_ID))
     v = tx.new('verifications','V',dict(artifact_id=obj['id'],status='queued',policy=POLICY,content_hash=key))
     obj['verification_id']=v['id']; obj['module']='MC.'+obj['id']; obj['file_path']='MC/'+obj['id']+'.lean'
     tx.put('lean_artifacts',obj)
@@ -82,13 +79,22 @@ def create_artifact(tx, body):
     contribute(tx,obj,'lean_work')
     return obj
 
+def validate_source(source, dependencies):
+    if re.search(r'\b(sorry|admit|axiom|unsafe|initialize|builtin_initialize|run_tac|run_elab|run_cmd|run_meta|run_io|elab|macro|syntax|extern|implemented_by|native_decide|skipKernelTC)\b|#|\x00', source):
+        raise HTTPException(422,'Unsupported metaprogramming, unproved axiom or placeholder; submit ordinary Lean definitions and proofs')
+    allowed = {'MC.'+d['id'] for d in dependencies}
+    for line in source.splitlines():
+        if re.match(r'^\s*import\b',line):
+            imports = line.strip().split()[1:]
+            if not imports or any(x not in allowed and not library_import(x) for x in imports): raise HTTPException(422,'Use installed Init/Std/Mathlib/Batteries/Aesop/Qq modules or declared verified MC dependencies')
+
 def closure(tx, obj):
     result = {}; visiting = set()
     def visit(a):
         if a['id'] in visiting: raise HTTPException(422,'Cyclic dependency')
         if a['id'] in result: return
         visiting.add(a['id'])
-        for i in a['dependencies']: visit(need(tx,'lean_artifacts',i))
+        for i in dict.fromkeys(a['dependencies']+a.get('target',{}).get('dependencies',[])): visit(need(tx,'lean_artifacts',i))
         visiting.remove(a['id']); result[a['id']]=a
     visit(obj); return list(result.values())
 
@@ -104,7 +110,7 @@ def environment(prefix=''):
         permitted_imports=[root+' and '+root+'.*' for root in LIBRARY_ROOTS]+['MC.<artifact_id> for each declared verified dependency'],
         allowed_axioms=sorted(ALLOWED_AXIOMS),
         submission=dict(format='single Lean source module', source_field='source',
-                        entry_theorem_field='theorem', dependencies_field='dependencies',
+                        entry_theorem_field='theorem', dependencies_field='dependencies', fixed_target_required=True, exact_target_match=True,
                         upload_only='New proof source and any new helper definitions; reference existing code by artifact ID',
                         server_assembles_dependencies=True, dependencies_auto_imported=True,
                         local_download_required=False, arbitrary_packages=False,
@@ -124,6 +130,9 @@ def artifact_summary(tx, a, prefix='', canonical=None):
     v=need(tx,'verifications',a['verification_id'])
     i=need(tx,'insights',a['insight_id'])
     canonical=canonical_proof_ids(tx) if canonical is None else canonical
+    from apps.api.modules.targets import get_target, target_proof_matches
+    bound=target_proof_matches(a,v,get_target(tx,a['insight_id']))
+    legacy=v['status']=='passed' and not bound
     duplicate=v['status']=='passed' and a['insight_id'] in canonical and canonical[a['insight_id']]!=a['id']
     signature=v.get('theorem_signature')
     if not signature and v['status']=='passed':
@@ -136,7 +145,8 @@ def artifact_summary(tx, a, prefix='', canonical=None):
                 signature_note='Use this Lean type and inspect source for definitions; the linked insight claim is a separate natural-language statement.',
                 dependencies=a['dependencies'], toolchain=a['toolchain'],
                 verification_policy=a['policy'], library_id=a.get('library_id'),
-                content_hash=a['content_hash'], status='historical_duplicate' if duplicate else v['status'],
+                content_hash=a['content_hash'], status='legacy_unbound' if legacy else 'historical_duplicate' if duplicate else v['status'],
+                target_bound=bound,target_hash=a.get('target',{}).get('target_hash'),
                 historical_duplicate=duplicate, canonical_proof_id=canonical.get(a['insight_id']),
                 reusable=v['status']=='passed' and v['policy']==POLICY and a.get('library_id')==LIBRARY_ID and not duplicate,
                 verification_id=v['id'], axioms=v.get('axioms'),

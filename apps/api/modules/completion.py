@@ -61,7 +61,8 @@ def sync_candidates(tx):
         if t['type']=='lean_work' and t.get('mode')=='formalize' and t['status']=='available' and t.get('target_id') in required and verified.get(t['target_id']):
             t.update(status='closed',closed_reason='Verified Lean already available');tx.put('tasks',t)
     def ensure_work(ident,artifact=None,solution=None):
-        if withdrawn(tx,'insights',ident): return
+        target=tx.get('insight_targets',ident)
+        if withdrawn(tx,'insights',ident) or not target or target.get('status')!='valid': return
         if ident in pending: return
         existing=next((t for t in tasks if t['type']=='lean_work' and t.get('target_id')==ident and t.get('mode') in ('formalize','repair') and t['status'] in ('available','claimed')),None)
         if existing:
@@ -84,12 +85,14 @@ def sync_candidates(tx):
         claim=candidate['claims_problem_solved']
         state=dict(id=ident,insight_id=ident,problem_id=p['id'],claims_problem_solved=claim,verification_target=final_target(p,claim),required_insight_ids=sorted(depths),
                    missing_insight_ids=sorted(i for i in depths if not verified.get(i)),
+                   missing_target_ids=sorted(i for i in depths if not tx.get('insight_targets',i) or tx.get('insight_targets',i).get('status')!='valid'),
                    target_ready=bool(p.get('lean_target') and p.get('target_status')=='reviewed'))
         if p['status']=='formal_proof_verified':
             state.update(status='problem_closed',solution_id=p.get('solution_id'))
         else:
             for missing in state['missing_insight_ids']: ensure_work(missing)
-            if state['missing_insight_ids']: state['status']='awaiting_lean'
+            if state['missing_target_ids']: state['status']='awaiting_insight_targets'
+            elif state['missing_insight_ids']: state['status']='awaiting_lean'
             else:
                 selected=None
                 for a in sorted(verified.get(ident,[]),key=lambda x:x['created_at'],reverse=True):

@@ -6,6 +6,19 @@ from apps.api import main
 from apps.api.infrastructure.store import Store
 from apps.worker import main as worker
 
+
+def post_insight(client,payload):
+    expression='True'
+    if payload.get('problem_id')=='PMATH':
+        expression='Nat.Prime 7' if payload.get('title')=='Prime seven' else '∀ x : ℝ, 0 ≤ x ^ 2'
+    payload.setdefault('lean_target',dict(definitions='import Mathlib' if payload.get('problem_id')=='PMATH' else '',expression=expression))
+    response=client.post('/api/v1/insights',json=payload)
+    if response.status_code==200:
+        assert worker.once()
+        target=client.get('/api/v1/insights/'+response.json()['id']+'/lean-target').json()
+        assert target['status']=='valid',target
+    return response
+
 @pytest.fixture(autouse=True)
 def legacy_test_identities(monkeypatch):
     monkeypatch.setattr(main,'REGISTRATION_CREDENTIALS',False)
@@ -18,9 +31,9 @@ def test_real_lean_chain_and_fixed_target(tmp_path,monkeypatch):
         tx.put('problems',dict(id='PTEST',title='Test only',statement='True',lean_target={'expression':'True'},target_status='reviewed',created_at=time.time(),status='open'))
     c=TestClient(main.app)
     assert c.post('/api/v1/contributors/claim',json={'name':'Tester'}).status_code==200
-    i=c.post('/api/v1/insights',json=dict(contributor_id='1',contributor_name='Tester',problem_id='PTEST',title='True',claim='True',proof='True introduction',proof_status='claimed_complete')).json()
+    i=post_insight(c,dict(contributor_id='1',contributor_name='Tester',problem_id='PTEST',title='True',claim='True',proof='True introduction',proof_status='claimed_complete')).json()
     def create(source,theorem,deps=[]):
-        current=c.post('/api/v1/insights',json=dict(contributor_id='1',contributor_name='Tester',problem_id='PTEST',title='Proof '+theorem,claim='True',proof='Test proof',proof_status='claimed_complete')).json()
+        current=post_insight(c,dict(contributor_id='1',contributor_name='Tester',problem_id='PTEST',title='Proof '+theorem,claim='True',proof='Test proof',proof_status='claimed_complete')).json()
         r=c.post('/api/v1/lean/artifacts',json=dict(contributor_id='1',contributor_name='Tester',insight_id=current['id'],source=source,theorem=theorem,dependencies=deps))
         assert r.status_code==200,r.text
         a=r.json(); assert worker.once()
@@ -75,7 +88,7 @@ def test_mathlib_real_proof_reuse_and_target(tmp_path,monkeypatch):
     c.post('/api/v1/contributors/claim',json={'name':'MathlibTester'})
     identity=dict(contributor_id='1',contributor_name='MathlibTester')
     def insight(title):
-        r=c.post('/api/v1/insights',json=dict(identity,problem_id='PMATH',title=title,
+        r=post_insight(c,dict(identity,problem_id='PMATH',title=title,
                    claim='For every real x, x squared is nonnegative.',proof='Apply sq_nonneg.',proof_status='claimed_complete'))
         assert r.status_code==200,r.text
         return r.json()['id']
@@ -97,7 +110,7 @@ def test_mathlib_real_proof_reuse_and_target(tmp_path,monkeypatch):
         target=worker.MATHLIB if p['name']=='mathlib' else worker.MATHLIB/'.lake/packages'/p['name']
         (packages/p['name']).symlink_to(target.resolve(),target_is_directory=True)
     local_env=dict(os.environ,PATH=str(worker.TOOLS.resolve()/'bin')+':'+os.environ['PATH'])
-    build=subprocess.run(['lake','env','lean',a['file_path']],cwd=project,env=local_env,capture_output=True,text=True,timeout=180)
+    build=subprocess.run(['lake','build',a['module']],cwd=project,env=local_env,capture_output=True,text=True,timeout=180)
     assert build.returncode==0,build.stdout+build.stderr
     cached=worker.CACHE/a['content_hash']/'module.olean'; before=cached.stat().st_mtime_ns
     j=insight('Reuse squares')
@@ -130,7 +143,7 @@ def test_automatic_candidate_completion(tmp_path,monkeypatch,target):
     c=TestClient(main.app);c.post('/api/v1/contributors/claim',json={'name':'CandidateTester'})
     identity=dict(contributor_id='1',contributor_name='CandidateTester')
     def insight(title,flag=0,refs=[]):
-        r=c.post('/api/v1/insights',json=dict(identity,problem_id='PCAND',title=title,claim='True',proof='By introduction',proof_status='claimed_complete',claims_problem_solved=flag,references=refs))
+        r=post_insight(c,dict(identity,problem_id='PCAND',title=title,claim='True',proof='By introduction',proof_status='claimed_complete',claims_problem_solved=flag,references=refs))
         assert r.status_code==200,r.text
         return r.json()
     dep=insight('Dependency');candidate=insight('Complete claim',1,[dep['id']])
@@ -185,7 +198,7 @@ def test_disproof_candidate_verifies_exact_negation(tmp_path,monkeypatch,origina
         tx.put('problems',dict(id='PNEG',title='Disproof target',statement=original_target,lean_target={'expression':original_target},target_status='reviewed',status='open',created_at=time.time()))
     c=TestClient(main.app);c.post('/api/v1/contributors/claim',json={'name':'DisproofTester'})
     identity=dict(contributor_id='1',contributor_name='DisproofTester')
-    result=c.post('/api/v1/insights',json=dict(identity,problem_id='PNEG',title='Disproof',claim='¬ False',proof='Identity',proof_status='claimed_complete',claims_problem_solved=-1))
+    result=post_insight(c,dict(identity,problem_id='PNEG',title='Disproof',claim='¬ False',proof='Identity',proof_status='claimed_complete',claims_problem_solved=-1,lean_target=dict(expression='¬ False')))
     assert result.status_code==200,result.text
     i=result.json()
     a=c.post('/api/v1/lean/artifacts',json=dict(identity,insight_id=i['id'],source='theorem negation : ¬ False := fun h => h',theorem='negation')).json()
@@ -232,16 +245,54 @@ def test_published_targets_reject_unrelated_or_circular_proofs(tmp_path,monkeypa
         tx.put('problems',dict(id=pid,title='Fixed target test',statement=target['expression'],lean_target=target,target_status='reviewed',status='open',created_at=time.time()))
     c=TestClient(main.app);c.post('/api/v1/contributors/claim',json={'name':'TargetGuardTester'})
     identity=dict(contributor_id='1',contributor_name='TargetGuardTester')
-    i=c.post('/api/v1/insights',json=dict(identity,problem_id=pid,title='Invalid completion candidate',claim='Test only',proof='Test only',proof_status='claimed_complete',claims_problem_solved=flag)).json()
+    expression=target['expression'] if flag==1 else '¬ ('+target['expression']+')'
+    fixed=dict(definitions=target.get('definitions',''),expression=expression)
+    i=post_insight(c,dict(identity,problem_id=pid,title='Invalid completion candidate',claim='Test only',proof='Test only',proof_status='claimed_complete',claims_problem_solved=flag,lean_target=fixed)).json()
     source='import Mathlib\ntheorem candidate : True := True.intro'
-    if assume_target: source=f'import Mathlib\ntheorem candidate (h : {target["expression"]}) : {target["expression"]} := h'
+    if assume_target: source=f'theorem candidate (h : MCTargets.{i["id"]}.statement) : MCTargets.{i["id"]}.statement := h'
     response=c.post('/api/v1/lean/artifacts',json=dict(identity,insight_id=i['id'],source=source,theorem='candidate'))
     assert response.status_code==200,response.text
     a=response.json();assert worker.once()
-    assert c.get('/api/v1/lean/verifications/'+a['verification_id']).json()['status']=='passed'
-    assert worker.once()
-    state=c.get('/api/v1/insights/'+i['id']).json()['completion']
-    result=c.get('/api/v1/solutions/'+state['solution_id']).json()
-    assert result['status']=='failed',result
-    assert 'type mismatch' in result['log'],result
+    verification=c.get('/api/v1/lean/verifications/'+a['verification_id']).json()
+    assert verification['status']=='failed',verification
+    assert 'fixed Insight target' in verification['log'],verification
+    assert verification.get('target_matched') is not True
     assert c.get('/api/v1/problems/'+pid).json()['status']=='open'
+
+
+@pytest.mark.skipif(os.environ.get('RUN_LEAN_TESTS')!='1',reason='Requires pinned verifier')
+@pytest.mark.parametrize('expression,definitions,source,expected',[
+    ('∀ n : Nat, n = n','','theorem fixed_result (n : Nat) : n = n := rfl','passed'),
+    ('∀ n : Nat, n = n','','theorem fixed_result : True := True.intro','failed'),
+    ('∀ n : Nat, n = n','','theorem fixed_result (h : ∀ n : Nat, n = n) : ∀ n : Nat, n = n := h','failed'),
+    ('Required','def Required : Prop := False','namespace Alternative\ndef Required : Prop := True\nend Alternative\ntheorem fixed_result : Alternative.Required := True.intro','failed'),
+])
+def test_insight_proofs_match_immutable_target_exactly(tmp_path,monkeypatch,expression,definitions,source,expected):
+    s=Store(tmp_path);(tmp_path/'artifacts').mkdir()
+    monkeypatch.setattr(main,'store',s);monkeypatch.setattr(worker,'STORE',s);monkeypatch.setattr(worker,'CACHE',tmp_path/'artifacts/cache')
+    with s.transaction() as tx:tx.put('problems',dict(id='PFIX',title='Fixed statement test',statement='Test',status='open',created_at=time.time()))
+    c=TestClient(main.app);c.post('/api/v1/contributors/claim',json={'name':'FixedTargetTester'})
+    identity=dict(contributor_id='1',contributor_name='FixedTargetTester')
+    i=post_insight(c,dict(identity,problem_id='PFIX',title='Exact target',claim='Test proposition',proof='Test proof',proof_status='claimed_complete',lean_target=dict(expression=expression,definitions=definitions))).json()
+    response=c.post('/api/v1/lean/artifacts',json=dict(identity,insight_id=i['id'],source=source,theorem='fixed_result'))
+    assert response.status_code==200,response.text
+    a=response.json();assert worker.once()
+    verification=c.get('/api/v1/lean/verifications/'+a['verification_id']).json()
+    assert verification['status']==expected,verification
+    assert bool(verification.get('target_matched'))==(expected=='passed')
+    if expected=='passed':assert verification['target_hash']==i['lean_target']['target_hash']
+    else:assert 'fixed Insight target' in verification['log'],verification
+
+
+@pytest.mark.skipif(os.environ.get('RUN_LEAN_TESTS')!='1',reason='Requires pinned verifier')
+def test_statement_elaboration_does_not_accept_unbound_parameters(tmp_path,monkeypatch):
+    s=Store(tmp_path);(tmp_path/'artifacts').mkdir()
+    monkeypatch.setattr(main,'store',s);monkeypatch.setattr(worker,'STORE',s);monkeypatch.setattr(worker,'CACHE',tmp_path/'artifacts/cache')
+    with s.transaction() as tx:tx.put('problems',dict(id='PFIX',title='Fixed statement test',statement='Test',status='open',created_at=time.time()))
+    c=TestClient(main.app);c.post('/api/v1/contributors/claim',json={'name':'ClosedTargetTester'})
+    identity=dict(contributor_id='1',contributor_name='ClosedTargetTester')
+    response=c.post('/api/v1/insights',json=dict(identity,problem_id='PFIX',title='Unbound parameter',claim='Test',proof='Test',proof_status='claimed_complete',lean_target=dict(definitions='variable (n : Nat)',expression='n = n')))
+    assert response.status_code==200,response.text
+    assert worker.once()
+    checked=c.get('/api/v1/insights/'+response.json()['id']+'/lean-target').json()
+    assert checked['status']=='invalid',checked
