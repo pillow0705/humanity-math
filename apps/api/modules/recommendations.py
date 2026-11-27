@@ -7,15 +7,16 @@ from apps.api.modules.scoring import Scores
 ALGORITHM='weighted-sample-v3'
 RNG=random.SystemRandom()
 CATALOG_SIZE=300
+EXPLORATION_CATALOG_SIZE=100
 
-def policy():
-    return dict(sample_size=CATALOG_SIZE,all_when_at_most=CATALOG_SIZE,without_replacement=True,min_weight=0.5,max_weight=2.0,review_prior_count=3,
+def policy(sample_size=CATALOG_SIZE):
+    return dict(sample_size=sample_size,all_when_at_most=sample_size,exploration_sample_size=EXPLORATION_CATALOG_SIZE,without_replacement=True,min_weight=0.5,max_weight=2.0,review_prior_count=3,
                 smoothed_review='(9 + sum(effective non-self review scores)) / (3 + count)',
                 review_weight='clamp(smoothed_review / 3, 0.5, 1.5)',
                 impact_points='Contribution points above review-adjusted base: insight citations/Lean/final-proof bonuses',
                 impact_bonus='0.5 * impact_points / (impact_points + 10)',
                 weight='min(2, review_weight * (1 + impact_bonus))',
-                selection='Return all active results when count <= 300; otherwise weighted random sampling of 300 distinct results',
+                selection=f'Return all active results when count <= {sample_size}; otherwise weighted random sampling of {sample_size} distinct results',
                 task_selection='Automatic dispatch: research synthesis refill (5% to 7%), complete-proof Lean chains, review refill (2N to 3N), Lean coverage refill (35% to 55%), then exploration. Within each class use foundational dependencies, review coverage and fair exposure.',
                 contribution_citation_cap=None)
 
@@ -48,10 +49,10 @@ def weighted_sample(items,weights,count):
     # Exponential races give weighted sampling without replacement.
     return [x for _,_,x in sorted((-math.log(max(RNG.random(),1e-300))/w,n,x) for n,(x,w) in enumerate(zip(items,weights)))[:count]]
 
-def recommend(tx,problem_id,prefix='',kind='insights',surface='recommendations'):
+def recommend(tx,problem_id,prefix='',kind='insights',surface='recommendations',sample_size=CATALOG_SIZE):
     scores=Scores(tx)
     items=[x for x in tx.all(kind) if x['problem_id']==problem_id and x['id'] not in scores.superseded and x['id'] not in scores.withdrawn]
-    selected=weighted_sample(items,[weight(scores,x)['weight'] for x in items],CATALOG_SIZE)
+    selected=weighted_sample(items,[weight(scores,x)['weight'] for x in items],sample_size)
     result=[]
     for x in selected:
         factors=weight(scores,x); exposure=record(tx,surface,x['id'])
@@ -60,9 +61,9 @@ def recommend(tx,problem_id,prefix='',kind='insights',surface='recommendations')
                            summary=summary[:800],summary_truncated=len(summary)>800,
                            claims_problem_solved=x.get('claims_problem_solved',0),detail_url=prefix+'/api/v1/'+kind+'/'+x['id'],
                            **{k:round(v,6) for k,v in factors.items()},previous_exposures=exposure['count'],
-                           reason='All available results' if len(items)<=CATALOG_SIZE else 'Weighted random sample'))
+                           reason='All available results' if len(items)<=sample_size else 'Weighted random sample'))
         note(tx,surface,x['id'])
-    return dict(algorithm=ALGORITHM,kind=kind,total_available=len(items),items=result,policy=policy())
+    return dict(algorithm=ALGORITHM,kind=kind,total_available=len(items),items=result,policy=policy(sample_size))
 
 def dependency_depths(scores):
     """Longest citation distance from a result to each of its prerequisites."""

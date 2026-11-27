@@ -210,12 +210,12 @@ async function loadResults(){
  if(!state.problem)return;
  const gen=++state.resultsGeneration,id=state.problem.id,tab=state.tab,offset=state.offset;
  const params=new URLSearchParams({problem_id:id,offset,limit:10});if(state.q)params.set('q',state.q);
- let endpoint='/'+tab;if(tab==='lean'){endpoint='/lean/artifacts';params.set('status','all');}if(tab==='tasks')params.set('status','available');
+ let endpoint=tab==='insight-ranking'?'/insights/ranking':'/'+tab;if(tab==='lean'){endpoint='/lean/artifacts';params.set('status','all');}if(tab==='tasks')params.set('status','available');
  $('results').setAttribute('aria-busy','true');$('results').innerHTML='<div class="empty">正在读取研究成果…</div>';$('pagination').innerHTML='';
  try{
   const data=await api(endpoint+'?'+params);if(gen!==state.resultsGeneration||id!==state.problem.id||tab!==state.tab)return;
   state.total=data.total;
-  $('results').innerHTML=data.items.length?data.items.map(item=>renderResult(item,tab)).join(''):'<div class="empty">'+({insights:'暂无匹配的 insight。可以让 Agent 领取探索任务。',lean:'本题尚无 Lean 成果。系统会按覆盖缺口分配形式化任务，完整证明及其依赖优先。',tasks:'当前没有可领取任务。也可以让 Agent 独立提交研究成果。'}[tab])+'</div>';
+  $('results').innerHTML=data.items.length?data.items.map(item=>renderResult(item,tab)).join(''):'<div class="empty">'+({'insight-ranking':'暂无匹配的 Insight。',insights:'暂无匹配的 insight。可以让 Agent 领取探索任务。',lean:'本题尚无 Lean 成果。系统会按覆盖缺口分配形式化任务，完整证明及其依赖优先。',tasks:'当前没有可领取任务。也可以让 Agent 独立提交研究成果。'}[tab])+'</div>';
   math($('results'));$('results').querySelectorAll('[data-detail]').forEach(b=>b.onclick=()=>detailDialog(b.dataset.kind,b.dataset.detail));
   $('results').querySelectorAll('[data-task]').forEach(b=>b.onclick=()=>participate(data.items.find(x=>x.id===b.dataset.task)));
   $('pagination').innerHTML=data.total>10?'<button class="button" id="page-prev" '+(offset===0?'disabled':'')+'>上一页</button><span>'+(offset+1)+'–'+Math.min(offset+10,data.total)+' / '+data.total+'</span><button class="button" id="page-next" '+(offset+10>=data.total?'disabled':'')+'>下一页</button>':'';
@@ -224,6 +224,8 @@ async function loadResults(){
  finally{if(gen===state.resultsGeneration)$('results').setAttribute('aria-busy','false');}
 }
 function renderResult(x,kind){
+ if(kind==='insight-ranking'){const e=x.evaluation||{};return '<article class="result insight-ranking-row"><span class="insight-rank" aria-label="'+esc((window.UI?.lang==='en'?'Rank ':'排名 ')+x.rank)+'">'+x.rank+'</span><div class="insight-ranking-main"><h3><button data-detail="'+esc(x.id)+'" data-kind="insights">'+esc(x.title)+'</button></h3><div class="result-footer"><span>'+author(x)+'</span><span class="result-metrics"><span>'+points(e.citation_points)+' 次引用</span><span>'+(e.effective_reviews||0)+' 条评价</span>'+(e.lean_bonus?'<span>Lean 已通过</span>':'')+'</span></div></div><div class="insight-ranking-score"><strong>'+points(e.contribution_points)+'</strong><span>贡献分</span></div></article>';}
+
  if(kind==='tasks'){
   const mode={formalize:'编写缺失证明',repair:'修复失败代码',audit:'检查已有证明'}[x.mode];
   const goals={research_synthesis:'梳理全部 Insights，明确证明缺口和下一步目标。',insight_explore:'结合已有成果，继续推进一个数学结论。',review:'一次审核最多 10 个 Insights，每个分别提交评语和 1–5 分评分。',lean_work:'忠于原命题，编写、修复或检查 Lean 证明。'};
