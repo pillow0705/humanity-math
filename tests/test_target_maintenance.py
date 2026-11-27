@@ -44,6 +44,8 @@ def test_two_independent_flags_revoke_only_current_version_and_repair(client):
     assert client.get('/api/v1/insights/'+i['id']+'/lean-target').json()['status']=='revoked'
     task=claim(client)
     assert task['task'].get('mode')!='alignment'
+    reports=task['research_package']['materials'][0]['previous_target_audits']
+    assert len(reports)==2 and all(r['target_hash']==i['lean_target']['target_hash'] and r['rationale'] for r in reports)
     data=dict(contributor_id='2',contributor_name='Bob',task_id=task['task']['id'],claim_token=task['claim_token'],targets=[dict(insight_id=i['id'],lean_target=dict(expression='1 = 1'))])
     r=client.post('/api/v1/lean-targets/batch',json=data);assert r.status_code==200,r.text
     new=r.json()['targets'][0];assert new['target_hash']!=i['lean_target']['target_hash']

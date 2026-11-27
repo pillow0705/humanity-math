@@ -57,6 +57,9 @@ def finish_task(tx, body, expected, target, problem_id, result_id):
     if expected=='lean_work' and t['target_id']!=target:
         artifact=tx.get('lean_artifacts',t['target_id'])
         if not artifact or artifact['insight_id']!=target: raise HTTPException(409,'Wrong Lean task target')
+    if expected=='lean_work' and result_id.startswith('L'):
+        t.setdefault('proof_attempts',[]).append(result_id)
+        t.update(result_id=result_id,last_submission_at=time.time());tx.put('tasks',t);return
     t.update(status='submitted',result_id=result_id,submitted_at=time.time()); tx.put('tasks',t)
 
 def contribute(tx, obj, kind):

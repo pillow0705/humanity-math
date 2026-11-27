@@ -355,3 +355,24 @@ def test_revoked_target_repair_reuses_insight_but_not_old_proof(tmp_path,monkeyp
     assert c.get('/api/v1/insights/'+i['id']+'/lean-target').json()['status']=='valid'
     _,wrong=prove('theorem oldAgain : True := True.intro','oldAgain');assert wrong['status']=='failed',wrong
     _,correct=prove('theorem fixed : 1 = 1 := rfl','fixed');assert correct['status']=='passed',correct
+
+
+@pytest.mark.skipif(os.environ.get('RUN_LEAN_TESTS')!='1',reason='Requires Docker and the pinned Lean toolchain')
+def test_same_lease_real_lean_error_feedback_and_successful_retry(tmp_path,monkeypatch):
+    s=Store(tmp_path);(tmp_path/'artifacts').mkdir()
+    monkeypatch.setattr(main,'store',s);monkeypatch.setattr(worker,'STORE',s);monkeypatch.setattr(worker,'CACHE',tmp_path/'artifacts/cache')
+    with s.transaction() as tx:tx.put('problems',dict(id='PRETRY',title='Retry test',statement='True',created_at=1,status='open'))
+    c=TestClient(main.app)
+    c.post('/api/v1/contributors/claim',json={'name':'Author'});c.post('/api/v1/contributors/claim',json={'name':'Prover'})
+    i=post_insight(c,dict(contributor_id='1',contributor_name='Author',problem_id='PRETRY',title='True',claim='True',proof='Introduction',proof_status='claimed_complete')).json()
+    claim=c.post('/api/v1/tasks/claim',json=dict(contributor_id='2',contributor_name='Prover',problem_id='PRETRY',type='lean_work')).json()
+    data=dict(contributor_id='2',contributor_name='Prover',insight_id=i['id'],task_id=claim['task']['id'],claim_token=claim['claim_token'])
+    r=c.post('/api/v1/lean/artifacts',json=dict(data,source='theorem bad : False := True.intro',theorem='bad'));assert r.status_code==200,r.text
+    assert worker.once()
+    feedback=c.get(r.json()['task_feedback_url']).json();assert feedback['status']=='claimed' and feedback['can_retry']
+    assert feedback['attempts'][0]['status']=='failed' and feedback['attempts'][0]['log']
+    r=c.post('/api/v1/lean/artifacts',json=dict(data,source='theorem good : True := True.intro',theorem='good'));assert r.status_code==200,r.text
+    assert worker.once()
+    feedback=c.get(r.json()['task_feedback_url']).json();assert feedback['status']=='submitted' and not feedback['can_retry']
+    assert feedback['attempts'][-1]['status']=='passed' and len(feedback['attempts'])==2
+    assert c.get('/api/v1/contributors/2/score').json()['score']==8
