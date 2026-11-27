@@ -12,7 +12,7 @@ def get_target(tx, insight_id):
 def register_target(tx, insight, body, replace_invalid=False, allow_pending_target_ids=()):
     from apps.api.modules.lean import POLICY, TOOLCHAIN, LIBRARY_ID, validate_source
     previous=get_target(tx,insight['id'])
-    if previous and not (replace_invalid and previous['status']=='invalid'):
+    if previous and not (replace_invalid and previous['status'] in ('invalid','revoked','stale')):
         raise HTTPException(409, 'This insight already has an immutable Lean target. Correct the statement by submitting a superseding insight.')
     dependencies = body.get('dependencies', [])
     if len(dependencies) != len(set(dependencies)):
@@ -24,7 +24,7 @@ def register_target(tx, insight, body, replace_invalid=False, allow_pending_targ
         if artifact['insight_id'] == insight['id']:
             raise HTTPException(422, 'A Lean target cannot depend on a proof artifact of the same insight')
         verification = need(tx, 'verifications', artifact['verification_id'])
-        if (verification.get('status') != 'passed' or verification.get('policy') != POLICY
+        if (verification.get('target_obsolete') or verification.get('status') != 'passed' or verification.get('policy') != POLICY
                 or artifact.get('library_id') != LIBRARY_ID):
             raise HTTPException(422, 'Lean target dependencies must be verified in the current environment')
     insight_dependencies=body.get('insight_dependencies',[])
@@ -48,6 +48,10 @@ def register_target(tx, insight, body, replace_invalid=False, allow_pending_targ
                   target_module='MCTargets.'+insight['id'],
                   target_constant='MCTargets.'+insight['id']+'.statement',
                   created_at=time.time())
+    if previous:
+        if previous['target_hash']==target['target_hash']:raise HTTPException(409,'A replacement must correct the previous target, not re-register identical content')
+        tx.put('target_versions',dict(previous,id=previous['target_hash']))
+    target['registered_by']=insight['contributor_id']
     tx.put('insight_targets', target)
     return target
 
@@ -55,7 +59,7 @@ def register_target(tx, insight, body, replace_invalid=False, allow_pending_targ
 def target_proof_matches(artifact, verification, target):
     """A compiler success alone is not a proof of the registered proposition."""
     from apps.api.modules.lean import POLICY, LIBRARY_ID
-    if not target or target.get('status') != 'valid':
+    if verification.get('target_obsolete') or not target or target.get('status') != 'valid':
         return False
     snapshot = artifact.get('target') or {}
     return bool(target.get('target_hash') and snapshot.get('target_hash') == target['target_hash']
@@ -69,13 +73,9 @@ def target_proof_matches(artifact, verification, target):
 
 
 def validate_review_alignment(tx, insight_id, body):
-    target = get_target(tx, insight_id)
-    expected_hash = body.get('target_hash')
-    if expected_hash and (not target or expected_hash != target['target_hash']):
-        raise HTTPException(409, 'The review does not match the registered Lean target')
-    if target and body.get('score')!=0 and body.get('target_alignment', 'not_applicable') == 'not_applicable':
-        raise HTTPException(422, 'Review the registered Lean target and set target_alignment to aligned, misaligned or uncertain')
-    body['target_hash'] = target['target_hash'] if target else None
+    # Retain old request fields for compatibility, without formal-audit semantics.
+    body['target_alignment']='not_applicable'
+    body['target_hash']=None
     return body
 
 

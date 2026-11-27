@@ -4,7 +4,7 @@ from fastapi import FastAPI, HTTPException, Request, Query
 from fastapi.responses import PlainTextResponse, Response, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from apps.api.infrastructure.store import Store, digest
-from apps.api.models import Insight, Review, ReviewBatch, Claim, Lease, Artifact, Audit, Solution, ContributorClaim, ContributorAction, CredentialLogin, CredentialChange, ResearchPlan, LeanTargetRegistration, LeanTargetBatch, BoardMessage
+from apps.api.models import Insight, Review, ReviewBatch, Claim, Lease, Artifact, Audit, Solution, ContributorClaim, ContributorAction, CredentialLogin, CredentialChange, ResearchPlan, LeanTargetRegistration, LeanTargetBatch, BoardMessage, TargetAuditBatch, TargetAudit
 from apps.api.modules.core import need, find_content, public_task, create_content, clean, finish_task, contribute, check_supersedes, supported_task
 from apps.api.modules.lean import create_artifact, closure, environment, artifact_summary, MATHLIB_REVISION, bundle_manifest
 
@@ -74,13 +74,18 @@ def prompt_for(t):
 def target_registration_package(tx,t):
     items=[need(tx,'insights',ident) for ident in t['target_ids']]
     schemas=app.openapi()['components']['schemas']
+    if t.get('mode')=='alignment':
+        schema=copy.deepcopy(schemas['TargetAuditBatch'])
+        schema['properties']['audits']['items']=copy.deepcopy(schemas['TargetAuditItem'])
+        schema['properties']['audits'].update(minItems=len(items),maxItems=len(items))
+        return dict(collaboration_language='en',mode='alignment',problem=describe_problem(need(tx,'problems',t['problem_id'])),goal=t['goal'],target_ids=t['target_ids'],target_hashes=t['target_hashes'],materials=[dict(i,lean_target=get_target(tx,i['id'])) for i in items],prompt=dict(type='lean_target_alignment',text=(BASE/'prompts/lean_target_alignment.md').read_text()),submission=dict(method='POST',url=PREFIX+'/api/v1/lean-targets/audits/batch',schema=schema),batch_points=8,flag_threshold=2)
     schema=copy.deepcopy(schemas['LeanTargetBatch'])
     schema['properties']['targets']['items']=copy.deepcopy(schemas['LeanTargetItem'])
     schema['properties']['targets']['items']['properties']['lean_target']=copy.deepcopy(schemas['LeanTarget'])
     schema['properties']['targets'].update(minItems=len(items),maxItems=len(items))
     refs=sorted({ref for item in items for ref in item.get('references',[])})
     reference_targets=[dict(insight_id=ident,lean_target=get_target(tx,ident),detail_url=PREFIX+'/api/v1/insights/'+ident) for ident in refs]
-    return dict(collaboration_language='en',problem=describe_problem(need(tx,'problems',t['problem_id'])),goal=t['goal'],target_ids=t['target_ids'],materials=[dict(item,lean_target=get_target(tx,item['id'])) for item in items],reference_targets=reference_targets,lean_environment=environment(PREFIX),prompt=prompt_for(t),submission=dict(method='POST',url=PREFIX+'/api/v1/lean-targets/batch',schema=schema,include_fields=['contributor_id','contributor_name','contributor_password','task_id','claim_token']),migration=dict(batch_size=len(items),batch_points=8,proofs_required=False,note='Register complete propositions, not proofs. Target-definition imports do not prove their statements. Root dependencies are prioritized.'))
+    return dict(collaboration_language='en',problem=describe_problem(need(tx,'problems',t['problem_id'])),goal=t['goal'],target_ids=t['target_ids'],materials=[dict(item,lean_target=get_target(tx,item['id'])) for item in items],reference_targets=reference_targets,lean_environment=environment(PREFIX),prompt=prompt_for(t),submission=dict(method='POST',url=PREFIX+'/api/v1/lean-targets/batch',schema=schema,include_fields=['contributor_id','contributor_name','contributor_password','task_id','claim_token']),mode='register',maintenance=dict(batch_size=len(items),batch_points=8,proofs_required=False,note='Register complete propositions, not proofs. Target-definition imports do not prove their statements. Root dependencies are prioritized.'))
 
 def research_package(tx,t):
     if not supported_task(t): raise HTTPException(409,'Unsupported task')
@@ -122,6 +127,7 @@ def research_package(tx,t):
     submission_schema=copy.deepcopy(app.openapi()['components']['schemas'][schemas[t['type']]])
     if t['type']=='review':
         submission_schema['properties']['reviews']['items']=copy.deepcopy(app.openapi()['components']['schemas']['ReviewItem'])
+        for deprecated in ('target_alignment','target_hash'):submission_schema['properties']['reviews']['items']['properties'].pop(deprecated,None)
         submission_schema['properties']['reviews'].update(minItems=len(t['target_ids']),maxItems=len(t['target_ids']))
     if t['type']=='research_synthesis':
         def inline_schema(value):
@@ -132,7 +138,7 @@ def research_package(tx,t):
             return value
         submission_schema=inline_schema(submission_schema)
     if t['type']=='insight_explore':
-        submission_schema['properties']['lean_target']=copy.deepcopy(app.openapi()['components']['schemas']['LeanTarget'])
+        submission_schema['properties']['lean_target']={'anyOf':[copy.deepcopy(app.openapi()['components']['schemas']['LeanTarget']),{'type':'null'}],'default':None}
         field=submission_schema['properties']['claims_problem_solved']
         field.update(enum=research_policy(problem)['allowed_completion_claims'],minimum=min(research_policy(problem)['allowed_completion_claims']))
     from apps.api.modules.synthesis import get_guide,catalog
@@ -273,7 +279,7 @@ def docs():
 
 @app.get('/api/v1/prompts/{type}',response_class=PlainTextResponse)
 def prompt(type:str):
-    if type not in ['insight_explore','insight_review','lean_work','research_synthesis','lean_target']: raise HTTPException(404,'Unknown prompt')
+    if type not in ['insight_explore','insight_review','lean_work','research_synthesis','lean_target','lean_target_alignment']: raise HTTPException(404,'Unknown prompt')
     return prefix_agent_paths((BASE/'prompts'/f'{type}.md').read_text())
 
 @app.get('/api/v1/activity')
@@ -327,6 +333,15 @@ def claim(body:Claim):
         if not b['task_id']:
             options=[t for t in options if dispatch_priority(tx,t,states,priority,automatic=not b['type'],cache=dispatch_cache) is not None]
             options.sort(key=lambda t:dispatch_priority(tx,t,states,priority,automatic=not b['type'],cache=dispatch_cache))
+            if not active(tx):
+                from apps.api.modules.target_maintenance import audit_pool
+                from apps.api.modules.migration import pool as registration_pool
+                options=[t for t in options if t['type']!='lean_target' or (bool(audit_pool(tx,t['problem_id'],b['contributor_id'],t['id'])) if t.get('mode')=='alignment' else bool(registration_pool(tx,t['problem_id'],t['id'])))]
+                if not b['type']:
+                    from apps.api.modules.scheduling import fair_order
+                    options=fair_order(tx,options,priority)
+                elif b['type']=='lean_target':
+                    options.sort(key=lambda t:t.get('mode','register')==(tx.get('target_mode_dispatch',t['problem_id']) or {}).get('last_mode'))
         review_attempted=set()
         for t in options:
             if active(tx) and t['type']!='lean_target':continue
@@ -337,8 +352,12 @@ def claim(body:Claim):
             if target_kind and withdrawn(tx,target_kind,t['target_id']): continue
             if t['status'] not in ('available','claimed') or need(tx,'problems',t['problem_id'])['status'] in ('formal_proof_verified','archived') or (t['status']=='claimed' and t['expires_at']>time.time()): continue
             if t['type']=='lean_target':
-                from apps.api.modules.migration import prepare_batch
-                if not active(tx) or not prepare_batch(tx,t):continue
+                if t.get('mode')=='alignment':
+                    from apps.api.modules.target_maintenance import prepare_audit
+                    if not prepare_audit(tx,t,b['contributor_id']):continue
+                else:
+                    from apps.api.modules.migration import prepare_batch
+                    if not prepare_batch(tx,t):continue
             if t['type']=='review':
                 if t['problem_id'] in review_attempted: continue
                 review_attempted.add(t['problem_id'])
@@ -353,6 +372,11 @@ def claim(body:Claim):
                 guide=get_guide(tx,t['problem_id'])
                 t['synthesis_base_hash']=guide['content_hash']
                 t['previous_plan_id']=guide['id']
+            if not b['type'] and not active(tx):
+                from apps.api.modules.scheduling import record_dispatch
+                record_dispatch(tx,t,options)
+            if t['type']=='lean_target' and not active(tx):
+                tx.put('target_mode_dispatch',dict(id=t['problem_id'],last_mode=t.get('mode','register')))
             token=secrets.token_urlsafe(32)
             if t['type'] in ('insight_explore',): t['research_direction']=assign_direction(need(tx,'problems',t['problem_id']))
             t.update(status='claimed',contributor_id=b['contributor_id'],contributor_name=b['contributor_name'],claim_hash=digest(token),expires_at=time.time()+3600,attempts=t['attempts']+1)
@@ -387,9 +411,10 @@ def post_insight(body:Insight,request:Request):
     if not b.get('is_prerequisite'): b.pop('is_prerequisite',None)
     def op(tx):
         obj=create_content(tx,'insights',b)
-        obj['lean_target']=register_target(tx,obj,b['lean_target'])
+        if b.get('lean_target'):obj['lean_target']=register_target(tx,obj,b['lean_target'])
         tx.put('insights',obj)
         if b.get('lean'):
+            if not b.get('lean_target'):raise HTTPException(422,'Inline Lean code requires a registered target; submit the Insight first and use target maintenance')
             payload=dict(b['lean'],insight_id=obj['id'],contributor_id=b['contributor_id'],contributor_name=b['contributor_name'],task_id=None,claim_token=None,supersedes_id=None)
             artifact=create_artifact(tx,payload)
             obj['initial_lean_artifact_id']=artifact['id']; tx.put('insights',obj)
@@ -623,7 +648,8 @@ def recommendations(id:str,kind:str=Query('insights',pattern='^insights$')):
 def dispatch_state(id:str):
     with store.transaction() as tx:
         need(tx,'problems',id)
-        return dict(policy='dynamic-dispatch-v1',state=sync_schedule(tx,id).get(id),priority=['research_synthesis','complete_proof_lean','review_refill','lean_coverage_refill','insight_explore'])
+        from apps.api.modules.scheduling import DISPATCH_WEIGHTS
+        return dict(policy='weighted-parallel-v2',state=sync_schedule(tx,id).get(id),priority=['complete_proof_lean'],weights=DISPATCH_WEIGHTS,target_flag_threshold=2)
 
 @app.post('/api/v1/research-plans')
 def post_research_plan(body:ResearchPlan,request:Request):
@@ -707,3 +733,20 @@ def withdraw_board_message(id:str,body:ContributorAction,request:Request):
         if obj.get('contributor_id')!=data['contributor_id'] or obj.get('pinned'):raise HTTPException(403,'Only the matching author may withdraw this message')
         obj.update(withdrawn=True,withdrawn_at=time.time());tx.put('board_messages',obj);return dict(id=id,withdrawn=True)
     return submit(request,data,op)
+
+
+@app.post('/api/v1/lean-targets/audits/batch')
+def post_target_audits(body:TargetAuditBatch,request:Request):
+    from apps.api.modules.target_maintenance import submit_audits
+    data=body.model_dump();return submit(request,data,lambda tx:submit_audits(tx,data))
+
+@app.post('/api/v1/insights/{id}/lean-target/audits')
+def post_target_audit(id:str,body:TargetAudit,request:Request):
+    from apps.api.modules.target_maintenance import record_audit
+    data=body.model_dump();return submit(request,data,lambda tx:record_audit(tx,data,id))
+
+@app.get('/api/v1/insights/{id}/lean-target/audits')
+def target_audits(id:str):
+    with store.transaction() as tx:
+        need(tx,'insights',id)
+        return dict(items=[{k:a[k] for k in ('id','insight_id','target_hash','alignment','rationale','contributor_name','created_at','misaligned_count')} for a in tx.all('target_audits') if a['insight_id']==id])

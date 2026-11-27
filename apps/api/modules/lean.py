@@ -51,6 +51,7 @@ def create_artifact(tx, body):
     from apps.api.modules.targets import get_target, target_proof_matches
     target=get_target(tx,insight['id'])
     if not target: raise HTTPException(409,'This insight needs an immutable Lean target before proof submission; its author must register the target first')
+    if target['status'] in ('revoked','stale'):raise HTTPException(409,'This target is revoked or stale; wait for proposition maintenance before submitting proofs')
     if target['status']=='error': raise HTTPException(409,'Target checking failed temporarily; its author must request a check retry before proof submission')
     if target['status']=='invalid': raise HTTPException(409,'The frozen Lean target is invalid; submit a corrected replacement insight before proving it')
     check_supersedes(tx,'lean_artifacts',body,insight['problem_id'])
@@ -68,7 +69,7 @@ def create_artifact(tx, body):
         if dep['insight_id'] in canonical and canonical[dep['insight_id']]!=dep['id']:
             raise HTTPException(409,dict(message='Use the canonical proof for this insight; the requested module is a historical duplicate.',existing_id=canonical[dep['insight_id']]))
         v = need(tx,'verifications',dep['verification_id'])
-        if v['status'] != 'passed' or v['policy'] != POLICY: raise HTTPException(422,'Dependencies must pass the current verification policy')
+        if v.get('target_obsolete') or v['status'] != 'passed' or v['policy'] != POLICY: raise HTTPException(422,'Dependencies must pass the current verification policy')
     source = body['source']
     validate_source(source,deps)
     key = digest(dict(target_hash=target['target_hash'],source=source,theorem=body['theorem'],dependencies=[d['content_hash'] for d in deps],toolchain=TOOLCHAIN,policy=POLICY,library_id=LIBRARY_ID))
@@ -148,10 +149,10 @@ def artifact_summary(tx, a, prefix='', canonical=None):
                 signature_note='Use this Lean type and inspect source for definitions; the linked insight claim is a separate natural-language statement.',
                 dependencies=a['dependencies'], toolchain=a['toolchain'],
                 verification_policy=a['policy'], library_id=a.get('library_id'),
-                content_hash=a['content_hash'], status='legacy_unbound' if legacy else 'historical_duplicate' if duplicate else v['status'],
+                content_hash=a['content_hash'], status='stale_target' if v.get('target_obsolete') else 'legacy_unbound' if legacy else 'historical_duplicate' if duplicate else v['status'],
                 target_bound=bound,target_hash=(a.get('target') or {}).get('target_hash'),
                 historical_duplicate=duplicate, canonical_proof_id=canonical.get(a['insight_id']),
-                reusable=v['status']=='passed' and v['policy']==POLICY and a.get('library_id')==LIBRARY_ID and not duplicate,
+                reusable=not v.get('target_obsolete',False) and v['status']=='passed' and v['policy']==POLICY and a.get('library_id')==LIBRARY_ID and not duplicate,
                 verification_id=v['id'], axioms=v.get('axioms'),
                 semantic_alignment=v.get('semantic_alignment','not_reviewed'),
                 detail_url=prefix+'/api/v1/lean/artifacts/'+a['id'],

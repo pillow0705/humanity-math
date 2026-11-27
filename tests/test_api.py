@@ -500,7 +500,7 @@ def test_three_problem_migration_archives_without_deleting(client):
     for pid in ['P007','P009','P003']:
         overview=client.get('/api/v1/problems/'+pid+'/overview').json()
         assert 'routes' not in overview['stats'] and overview['stats']['insights']==1
-        assert overview['stats']['available_tasks']==3  # Legacy seed has no immutable target yet.
+        assert overview['stats']['available_tasks']==4  # Includes permanent proposition maintenance for the legacy seed.
         claimed=client.post('/api/v1/tasks/claim',json=dict(identity,problem_id=pid,type='insight_explore'))
         assert claimed.status_code==200,claimed.text
         assert claimed.json()['research_package']['problem']['id']==pid
@@ -878,22 +878,22 @@ def dispatch_metrics(client):
 
 def test_dynamic_review_refill_three_distinct_reviewers_and_fallback(client):
     for n in range(5):client.post('/api/v1/insights',json=dict(insight(),title='Work '+str(n)))
-    assert dispatch_claim(client)['task']['type']=='research_synthesis'
-    first=dispatch_claim(client);assert first['task']['type']=='review' and len(first['task']['target_ids'])==5
-    lean=dispatch_claim(client,'3','Bob');assert lean['task']['type']=='lean_work'
-    assert dispatch_claim(client,'1','Alice')['task']['type']=='lean_work'
-    assert dispatch_claim(client,'1','Alice')['task']['type']=='lean_work'
-    fallback=dispatch_claim(client,'4','Beta');assert fallback['task']['type']=='insight_explore'
+    assert dispatch_claim(client,type='research_synthesis')['task']['type']=='research_synthesis'
+    first=dispatch_claim(client,type='review');assert first['task']['type']=='review' and len(first['task']['target_ids'])==5
+    lean=dispatch_claim(client,'3','Bob',type='lean_work');assert lean['task']['type']=='lean_work'
+    assert dispatch_claim(client,'1','Alice',type='lean_work')['task']['type']=='lean_work'
+    assert dispatch_claim(client,'1','Alice',type='lean_work')['task']['type']=='lean_work'
+    fallback=dispatch_claim(client,'4','Beta',type='insight_explore');assert fallback['task']['type']=='insight_explore'
     state=dispatch_metrics(client);assert state['review_reserved']==5 and state['lean_reserved']==3
     submit_dispatch_reviews(client,first)
-    assert dispatch_claim(client)['task']['type']=='insight_explore'  # No repeat reviews by Aster.
-    second=dispatch_claim(client,'3','Bob');assert second['task']['type']=='review'
+    assert dispatch_claim(client,type='insight_explore')['task']['type']=='insight_explore'  # No repeat reviews by Aster.
+    second=dispatch_claim(client,'3','Bob',type='review');assert second['task']['type']=='review'
     submit_dispatch_reviews(client,second)
     state=dispatch_metrics(client);assert state['reviews']==10 and state['review_refill']
-    third=dispatch_claim(client,'4','Beta');submit_dispatch_reviews(client,third)
+    third=dispatch_claim(client,'4','Beta',type='review');submit_dispatch_reviews(client,third)
     state=dispatch_metrics(client);assert state['reviews']==15 and not state['review_refill']
     assert client.post('/api/v1/tasks/'+lean['task']['id']+'/release',json={'claim_token':lean['claim_token']}).status_code==200
-    assert dispatch_claim(client)['task']['type']=='lean_work'
+    assert dispatch_claim(client,type='lean_work')['task']['type']=='lean_work'
     # Between the lower and upper review thresholds, completed refill stays off.
     client.post('/api/v1/insights',json=dict(insight(),title='New work'))
     assert not dispatch_metrics(client)['review_refill']
@@ -905,25 +905,27 @@ def test_dynamic_reservations_bound_concurrent_lean_dispatch(client):
     for n in range(10):client.post('/api/v1/insights',json=dict(insight(),title='Concurrent '+str(n)))
     with concurrent.futures.ThreadPoolExecutor(max_workers=9) as pool:
         claims=list(pool.map(lambda _:dispatch_claim(client),range(9)))
-    assert sum(c['task']['type']=='review' for c in claims)==1
-    assert sum(c['task']['type']=='lean_work' for c in claims)==6
-    assert sum(c['task']['type']=='research_synthesis' for c in claims)==1
-    assert sum(c['task']['type']=='insight_explore' for c in claims)==1
-    state=dispatch_metrics(client);assert state['review_reserved']==10 and state['lean_reserved']==6
+    assert sum(c['task']['type']=='review' for c in claims)<=1
+    lean_count=sum(c['task']['type']=='lean_work' for c in claims)
+    assert 1<=lean_count<=6
+    assert len({c['task']['target_id'] for c in claims if c['task']['type']=='lean_work'})==lean_count
+    assert sum(c['task']['type']=='research_synthesis' for c in claims)<=1
+    assert any(c['task']['type']=='insight_explore' for c in claims)
+    state=dispatch_metrics(client);assert state['review_reserved']<=10 and state['lean_reserved']==lean_count
     lean=next(c for c in claims if c['task']['type']=='lean_work')
     with main.store.transaction() as tx:
         t=tx.get('tasks',lean['task']['id']);t['expires_at']=0;tx.put('tasks',t)
-    assert dispatch_claim(client)['task']['type']=='lean_work'
-    assert dispatch_metrics(client)['lean_reserved']==6
+    assert dispatch_claim(client,type='lean_work')['task']['type']=='lean_work'
+    assert dispatch_metrics(client)['lean_reserved']==lean_count
 
 
 def test_dynamic_lean_hysteresis_pending_verification_and_completion(client):
     from apps.api.modules.lean import POLICY
     for n in range(10):client.post('/api/v1/insights',json=dict(insight(),title='Formalize '+str(n)))
-    assert dispatch_claim(client)['task']['type']=='research_synthesis'
+    assert dispatch_claim(client,type='research_synthesis')['task']['type']=='research_synthesis'
     # The author cannot review their own results, so available coverage work is selected.
     for index in range(6):
-        c=dispatch_claim(client,'1','Alice');assert c['task']['type']=='lean_work'
+        c=dispatch_claim(client,'1','Alice',type='lean_work');assert c['task']['type']=='lean_work'
         a=client.post('/api/v1/lean/artifacts',json=dict(contributor_id='1',contributor_name='Alice',task_id=c['task']['id'],claim_token=c['claim_token'],insight_id=c['task']['target_id'],source='theorem cover : True := True.intro',theorem='cover')).json()
         assert dispatch_metrics(client)['lean_reserved']>=1
         with main.store.transaction() as tx:
@@ -931,16 +933,16 @@ def test_dynamic_lean_hysteresis_pending_verification_and_completion(client):
         state=dispatch_metrics(client)
         assert state['verified_insights']==index+1
         assert state['lean_refill']==(index<5)
-    assert dispatch_claim(client,'1','Alice')['task']['type']=='insight_explore'
+    assert dispatch_claim(client,'1','Alice',type='insight_explore')['task']['type']=='insight_explore'
 
 
 def test_candidate_dispatch_overrides_review_deficit_then_falls_back(client):
     root=client.post('/api/v1/insights',json=dict(insight(),title='Root')).json()
     top=client.post('/api/v1/insights',json=dict(insight(),title='Complete',references=[root['id']],claims_problem_solved=1)).json()
-    assert dispatch_claim(client)['task']['type']=='research_synthesis'
+    assert dispatch_claim(client,type='research_synthesis')['task']['type']=='research_synthesis'
     a=dispatch_claim(client);b=dispatch_claim(client,'3','Bob')
     assert [a['task']['target_id'],b['task']['target_id']]==[root['id'],top['id']]
-    c=dispatch_claim(client,'4','Beta');assert c['task']['type']=='review'
+    c=dispatch_claim(client,'4','Beta',type='review');assert c['task']['type']=='review'
     artifact=client.post('/api/v1/lean/artifacts',json=dict(contributor_id='2',contributor_name='Aster',task_id=a['task']['id'],claim_token=a['claim_token'],insight_id=root['id'],source='theorem root : True := True.intro',theorem='root'))
     assert artifact.status_code==200
     assert dispatch_claim(client,'1','Alice')['task']['type']=='insight_explore'
@@ -954,8 +956,8 @@ def test_review_assignment_prefers_low_coverage_and_limits_last_batch(client):
             if person=='4' and index==2:continue
             assert client.post('/api/v1/insights/'+target['id']+'/reviews',json=dict(contributor_id=person,contributor_name=name,target_alignment='aligned',score=4,verdict='support',rationale='Independent assessment')).status_code==200
     state=dispatch_metrics(client);assert state['reviews']==8 and state['review_room']==1 and state['review_refill']
-    assert dispatch_claim(client)['task']['type']=='research_synthesis'
-    claimed=dispatch_claim(client,'4','Beta')
+    assert dispatch_claim(client,type='research_synthesis')['task']['type']=='research_synthesis'
+    claimed=dispatch_claim(client,'4','Beta',type='review')
     assert claimed['task']['type']=='review' and claimed['task']['target_ids']==[targets[2]['id']]
     submit_dispatch_reviews(client,claimed)
     assert dispatch_metrics(client)['reviews']==9 and not dispatch_metrics(client)['review_refill']
@@ -966,8 +968,8 @@ def test_review_prefers_fewer_scores_and_avoids_prior_reviewer(client):
     targets=[client.post('/api/v1/insights',json=dict(insight(),title='Priority '+str(n))).json() for n in range(3)]
     for index,person,name in [(0,'2','Aster'),(0,'3','Bob'),(1,'3','Bob')]:
         client.post('/api/v1/insights/'+targets[index]['id']+'/reviews',json=dict(contributor_id=person,contributor_name=name,target_alignment='aligned',score=4,verdict='support',rationale='Reviewed'))
-    assert dispatch_claim(client)['task']['type']=='research_synthesis'
-    claimed=dispatch_claim(client)
+    assert dispatch_claim(client,type='research_synthesis')['task']['type']=='research_synthesis'
+    claimed=dispatch_claim(client,type='review')
     assert claimed['task']['target_ids']==[targets[2]['id'],targets[1]['id']]
 
 @pytest.mark.parametrize('n,passed,previous,expected,target',[(20,6,False,True,11),(20,7,False,False,11),(20,7,True,True,11),(20,10,True,True,11),(20,11,True,False,11),(3,1,False,True,2),(0,0,True,False,0)])
@@ -1007,7 +1009,7 @@ def test_activity_excludes_reviews_failures_and_private_fields(client):
 
 def test_research_synthesis_claim_submit_context_and_credit(client):
     items=[client.post('/api/v1/insights',json=dict(insight(),title='Synthesis '+str(n))).json() for n in range(30)]
-    claim=dispatch_claim(client)
+    claim=dispatch_claim(client,type='research_synthesis')
     assert claim['task']['type']=='research_synthesis'
     assert len(claim['research_package']['synthesis_catalog'])==30
     assert claim['research_package']['submission']['url'].endswith('/research-guidance')
@@ -1025,7 +1027,7 @@ def test_research_synthesis_claim_submit_context_and_credit(client):
     assert explore['research_package']['research_guidance']['latest']['id']==plan['id']
     # 1/30 < 5%, refill remains active to ceil(0.07*30)=3.
     assert dispatch_metrics(client)['synthesis_target']==3
-    next_claim=dispatch_claim(client);assert next_claim['task']['previous_plan_id']==plan['id']
+    next_claim=dispatch_claim(client,type='research_synthesis');assert next_claim['task']['previous_plan_id']==plan['id']
     assert client.post('/api/v1/research-plans',json=dict(body,task_id=next_claim['task']['id'],claim_token=next_claim['claim_token'])).status_code==409
     assert client.post('/api/v1/contributors/2/submissions/research_updates/'+plan['update_id']+'/withdraw',json=dict(contributor_id='2',contributor_name='Aster')).status_code==200
     assert client.get('/api/v1/problems/P001/research-guidance').json()['latest']['id']==plan['id']

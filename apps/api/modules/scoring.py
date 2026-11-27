@@ -10,7 +10,7 @@ class Scores:
     def __init__(self,tx):
         self.withdrawn={x['object_id'] for x in tx.all('submission_states') if x.get('withdrawn')}
         self.people={p['id']:p for p in tx.all('contributors')}
-        self.objects={k:{x['id']:x for x in tx.all(k)} for k in ('insights','reviews','audits','lean_artifacts','solutions','research_plans','research_updates','target_batches')}
+        self.objects={k:{x['id']:x for x in tx.all(k)} for k in ('insights','reviews','audits','lean_artifacts','solutions','research_plans','research_updates','target_batches','target_audit_batches')}
         self.verifications={x['id']:x for x in tx.all('verifications')}
         self.targets={x['insight_id']:x for x in tx.all('insight_targets')}
         from apps.api.modules.targets import target_proof_matches
@@ -70,6 +70,8 @@ class Scores:
         if obj['id'] in self.superseded: return dict(result,status='superseded')
         if kind=='insights':
             ev=self.evaluation(obj,kind);return dict(result,base_points=ev['base_points'],score=ev['contribution_points'],evaluation=ev)
+        if kind=='lean_target' and collection=='target_audit_batches':
+            return dict(result,score=round(8*len(obj['audit_ids'])/obj['batch_size'],6))
         if kind=='lean_target' and collection=='target_batches':
             eligible=[ident for ident in obj['target_ids'] if ident not in self.withdrawn|self.superseded and self.targets.get(ident,{}).get('target_hash')==obj['target_hashes'].get(ident) and self.targets.get(ident,{}).get('migration_batch_id')==obj['id']]
             valid=sum(self.targets[ident]['status']=='valid' for ident in eligible)

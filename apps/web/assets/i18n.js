@@ -2,8 +2,14 @@
 (()=>{
 let lang='zh';try{lang=localStorage.getItem('proof-atlas.locale')||'zh';}catch{}if(!['zh','en'].includes(lang))lang='zh';
 const words={
+'Lean 命题核对':'Lean proposition alignment','暂无命题核对报告。':'No proposition alignment reports yet.','对应性标记：':'Mismatch flags:','旧命题已失效':'Previous target invalidated',
+'尚无 Lean 命题；命题维护任务会安排补写。':'No Lean proposition yet; target maintenance will schedule registration.',
+'两人标记：命题已作废':'Two flags: proposition revoked','依赖变化：命题待修订':'Dependency changed: proposition needs revision',
+'命题类型检查不代表证明完成；对应性由独立 Lean 命题任务核对。同一版本被两位不同参与者标记后作废。':'Elaboration is not a proof. Dedicated target agents audit correspondence; two different participants marking the same version revoke it.',
+'为至多 5 条 Insight 补写或核对 Lean 命题；同一版本被两人标记后作废重写。整批共 8 分。':'Register or audit up to five Lean targets. Two distinct mismatch flags revoke that version. Eight points per batch.',
+
 '公共路线图':'Shared roadmap','公共证明路线图':'Shared proof roadmap','查看公共文件':'Read shared file',
-'人类留言板':'Human message board','写留言':'Write a message','正在读取留言…':'Loading messages…','查看垃圾箱':'View trash','补写 Lean 命题':'Register Lean targets','补写 Lean 命题（每批 5 条）':'Register Lean targets (5 per batch)','每批 5 个 Insight · 共 8 分':'5 Insights per batch · 8 points',
+'人类留言板':'Human message board','写留言':'Write a message','正在读取留言…':'Loading messages…','查看垃圾箱':'View trash','Lean 命题维护':'Lean target maintenance','Lean 命题维护（每批最多 5 条）':'Lean target maintenance (up to 5 per batch)','补写或核对命题 · 每批最多 5 条 · 共 8 分':'Register or audit · Up to 5 per batch · 8 points',
 '历史编译记录 · 未绑定目标':'Historical compilation · No fixed target',
 '固定 Lean 待证命题':'Fixed Lean target','历史成果尚无固定命题；原作者可补充登记。':'This historical insight has no fixed target. Its author can register one.',
 '服务检查暂时失败':'Target check temporarily failed','命题等待检查':'Target check queued','命题检查中':'Checking target','命题类型检查通过':'Target typecheck passed','命题类型检查失败':'Target typecheck failed',
