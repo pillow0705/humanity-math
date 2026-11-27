@@ -1,0 +1,127 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      lean: ${{ steps.paths.outputs.lean }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: paths
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT" != pull_request ]; then
+            echo 'lean=true' >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -Eq '^(apps/(api|worker)/|contracts/|tests/|requirements.txt|deploy/|.github/)'; then
+            echo 'lean=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'lean=false' >> "$GITHUB_OUTPUT"
+          fi
+  api:
+    name: API and frontend (${{ matrix.python }})
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        python: ['3.10', '3.12']
+    env:
+      MATH_DATA: /tmp/humanity-api-test-data
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+      - run: python -m pip install -r requirements.txt
+      - run: python -m pytest tests/test_api.py tests/test_store_cache.py tests/test_release.py -q
+      - name: Check browser JavaScript
+        run: find apps/web/assets -maxdepth 1 -name '*.js' -exec node --check {} \;
+  lean:
+    name: Lean integration
+    needs: changes
+    if: needs.changes.outputs.lean == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      MATH_DATA: /tmp/humanity-lean-test-data
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: python -m venv .venv && .venv/bin/pip install -r requirements.txt
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: tools
+          key: lean-4.19.0-mathlib-c44e0c8-${{ runner.os }}-${{ runner.arch }}-v1
+      - name: Install pinned Lean and Mathlib
+        run: PATH="$PWD/.venv/bin:$PATH" bash deploy/ci/setup-lean.sh
+      - name: Verify real proofs in isolated storage
+        run: sudo env RUN_LEAN_TESTS=1 MATH_DATA="$MATH_DATA" "$PWD/.venv/bin/python" -m pytest tests/test_lean_integration.py -q
+  passed:
+    name: CI passed
+    if: always()
+    needs: [api, changes, lean]
+    runs-on: ubuntu-24.04
+    steps:
+      - env:
+          API: ${{ needs.api.result }}
+          CHANGES: ${{ needs.changes.result }}
+          LEAN: ${{ needs.lean.result }}
+        run: |
+          test "$API" = success
+          test "$CHANGES" = success
+          test "$LEAN" = success || test "$LEAN" = skipped
+  deploy:
+    name: Deploy production
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: passed
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment:
+      name: production
+      url: https://eggtea.org/math-collab/
+    concurrency:
+      group: production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Send tested release to the deployment service
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+          DEPLOY_KNOWN_HOSTS: ${{ vars.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p "$RUNNER_TEMP/deploy-ssh"
+          printf '%s\n' "$DEPLOY_KEY" > "$RUNNER_TEMP/deploy-ssh/key"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$RUNNER_TEMP/deploy-ssh/known_hosts"
+          git archive --format=tar "$GITHUB_SHA" | gzip -n | ssh -i "$RUNNER_TEMP/deploy-ssh/key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/deploy-ssh/known_hosts" -o ConnectTimeout=20 "$DEPLOY_USER@$DEPLOY_HOST" "deploy $GITHUB_SHA"
+      - name: Check public agent documentation
+        run: curl --fail --location --retry 3 --max-time 30 https://eggtea.org/math-collab/api/v1/agent-docs > /dev/null

@@ -1,0 +1,4 @@
+{
+  "definitions": "import Mathlib\n",
+  "expression": "Irrational Real.eulerMascheroniConstant"
+}

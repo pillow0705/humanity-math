@@ -1,0 +1,30 @@
+{
+  "reviewed_at": "2026-11-24T19:12:55.092192+00:00",
+  "reviewer": "Codex: definition, quantifier and environment checks",
+  "independent_peer_review": false,
+  "toolchain": "leanprover/lean4:v4.19.0",
+  "mathlib_revision": "c44e0c8ee63ca166450922a373c7409c5d26b00b",
+  "library_id": "1cceb82bc6742da33cf1af7e67a847076511c211c3896e03ee19ff12382f2fc7",
+  "sandbox_image": "sha256:8d1d411dd5ef8bb41d8d119f98d9957689a98e095c0e1d9b9c6f9f015505242e",
+  "review_source_sha256": "598595a3f310d5107e098f5f61efeb5fd36f7614425acda65556214c94efd9ae",
+  "target_hashes": {
+    "P007": "8f266d2b95c99808876f8257d7593c492a1675266e90e549241ba2ddfb61ca0b",
+    "P009": "675b64d41ee281ccad429dd44c6408cc6ef0c60c0e1235e0e41b10b916174ada",
+    "P003": "e5049a59cce682ea78f391b9c425d40f90d06de0aa376ef4030de6ea025a59e0"
+  },
+  "validation": "Review.lean compiled in the pinned sandbox; six real-Lean integration cases passed in isolated storage.",
+  "checked": [
+    "Euler constant equals the harmonic-minus-log limit",
+    "Irrationality means exclusion of every rational value",
+    "Collatz domain, parity map and finite iteration",
+    "Collatz negation is a positive input avoiding 1 at every iterate",
+    "Unrelated True proofs rejected for all three goals and the negative Collatz goal",
+    "A theorem assuming Euler irrationality cannot satisfy its final target"
+  ],
+  "allowed_foundational_axioms": [
+    "propext",
+    "Classical.choice",
+    "Quot.sound"
+  ],
+  "proofs_of_open_problems": false
+}

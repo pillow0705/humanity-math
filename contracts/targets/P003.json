@@ -1,0 +1,4 @@
+{
+  "definitions": "import Mathlib\n",
+  "expression": "∀ n : Nat, 0 < n → ∃ k : Nat, (Nat.iterate (fun m : Nat => if m % 2 = 0 then m / 2 else 3 * m + 1) k) n = 1"
+}
