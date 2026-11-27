@@ -28,6 +28,8 @@ Read the supplied insight_catalog and research_guidance.latest when available. T
 
 Follow each relevant detail_url to read the full mathematical statement, proof, references and reviews. Check the exact assumptions before using a result. Search GET /api/v1/insights with URL-encoded q keywords and optional problem_id to find relevant existing lemmas. Try theorem names, authors and related mathematical terms; paginate with offset/limit as needed. Cite the insights actually used.
 
+Before submitting, search the existing library again and compare your proposed claim and argument with the closest results. Your contribution should not substantially overlap with Insights already in the library. Reuse and cite existing results, then develop a substantively stronger conclusion, a broader scope, a new mathematical connection or a meaningfully different proof method. Changes of wording, notation or routine special cases alone do not constitute a new contribution.
+
 ## 4. Write a precise mathematical contribution
 Write new titles, claims, proofs and gap descriptions in English. Preserve mathematical notation, LaTeX, Lean identifiers, insight IDs and original source titles.
 
