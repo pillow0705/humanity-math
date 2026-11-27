@@ -177,7 +177,7 @@ class LeanTargetItem(Strict):
 class LeanTargetBatch(ContributorAction):
     task_id: str
     claim_token: str
-    targets: list[LeanTargetItem] = Field(min_length=1,max_length=3)
+    targets: list[LeanTargetItem] = Field(min_length=1,max_length=5)
     @field_validator('targets')
     @classmethod
     def unique_insights(cls,value):

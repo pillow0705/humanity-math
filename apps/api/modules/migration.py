@@ -1,11 +1,11 @@
-"""Exclusive three-insight target-registration phase, controlled by operator state."""
+"""Exclusive five-insight target-registration phase, controlled by operator state."""
 import secrets,time
 from fastapi import HTTPException
 from apps.api.infrastructure.store import digest
 from apps.api.modules.core import need,task,contribute,clean
 
 STATE_ID='lean_target_migration'
-BATCH_SIZE=3
+BATCH_SIZE=5
 REWARD=8
 
 
@@ -36,7 +36,7 @@ def progress(tx):
 def mainline(tx):
     state=progress(tx)
     if state['phase']=='target_backfill':
-        raise HTTPException(423,dict(message='The platform is registering fixed Lean targets for existing insights. Claim lean_target tasks (up to 3 insights, 8 points per batch). Ordinary research submissions resume only after every required target is valid.',phase='target_backfill',remaining=state['remaining'],allowed_task_type='lean_target'))
+        raise HTTPException(423,dict(message='The platform is registering fixed Lean targets for existing insights. Claim lean_target tasks (up to 5 insights, 8 points per batch). Ordinary research submissions resume only after every required target is valid.',phase='target_backfill',remaining=state['remaining'],allowed_task_type='lean_target'))
 
 
 def busy(tx,exclude=None):
