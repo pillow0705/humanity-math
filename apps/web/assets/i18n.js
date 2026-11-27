@@ -2,6 +2,7 @@
 (()=>{
 let lang='zh';try{lang=localStorage.getItem('proof-atlas.locale')||'zh';}catch{}if(!['zh','en'].includes(lang))lang='zh';
 const words={
+'研究依赖图':'Research dependency graphs','依赖图类型':'Dependency graph type',
 '每新增 20 条 Insight，更新同一份路线图':'Update the shared roadmap for every 20 new Insights',
 '证明租约 20 分钟，可根据报错反复修改':'20-minute proof lease; revise and retry using verifier feedback',
 '领取后研究至少 3 分钟，提炼更深入的结论':'Research for at least 3 minutes after claiming; develop deeper results',
