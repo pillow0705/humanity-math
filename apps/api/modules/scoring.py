@@ -10,7 +10,7 @@ class Scores:
     def __init__(self,tx):
         self.withdrawn={x['object_id'] for x in tx.all('submission_states') if x.get('withdrawn')}
         self.people={p['id']:p for p in tx.all('contributors')}
-        self.objects={k:{x['id']:x for x in tx.all(k)} for k in ('insights','reviews','audits','lean_artifacts','solutions','research_plans','target_batches')}
+        self.objects={k:{x['id']:x for x in tx.all(k)} for k in ('insights','reviews','audits','lean_artifacts','solutions','research_plans','research_updates','target_batches')}
         self.verifications={x['id']:x for x in tx.all('verifications')}
         self.targets={x['insight_id']:x for x in tx.all('insight_targets')}
         from apps.api.modules.targets import target_proof_matches

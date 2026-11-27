@@ -5,7 +5,7 @@ from apps.api.modules.core import need
 from apps.api.modules.scoring import Scores
 from apps.api.modules.lifecycle import state
 
-KINDS=('insights','reviews','lean_artifacts','audits','solutions','research_plans','target_batches')
+KINDS=('insights','reviews','lean_artifacts','audits','solutions','research_plans','research_updates','target_batches')
 
 def submission(tx,person,kind,ident,prefix=''):
     if kind not in KINDS: raise HTTPException(422,'Unknown submission kind')

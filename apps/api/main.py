@@ -104,7 +104,7 @@ def research_package(tx,t):
                 obj=find_content(tx,ref); seen.add(ref); materials.append(obj); queue.append(obj)
     materials=[dict(x,lean_target=get_target(tx,x['id'])) if x['id'].startswith('I') else x for x in materials]
     reviews=[x for x in tx.all('reviews') if x['target_id'] in seen]
-    endpoint={'insight_explore':'/insights','review':'/reviews/batch','research_synthesis':'/research-plans','lean_work':f"/lean/artifacts/{t.get('target_id')}/audits" if t.get('mode')=='audit' else '/lean/artifacts'}[t['type']]
+    endpoint={'insight_explore':'/insights','review':'/reviews/batch','research_synthesis':'/problems/'+problem['id']+'/research-guidance','lean_work':f"/lean/artifacts/{t.get('target_id')}/audits" if t.get('mode')=='audit' else '/lean/artifacts'}[t['type']]
     schemas={'insight_explore':'Insight','review':'ReviewBatch','research_synthesis':'ResearchPlan','lean_work':'Audit' if t.get('mode')=='audit' else 'Artifact'}
     from apps.api.modules.lean import canonical_proof_ids
     canonical=canonical_proof_ids(tx)
@@ -124,14 +124,20 @@ def research_package(tx,t):
         submission_schema['properties']['reviews']['items']=copy.deepcopy(app.openapi()['components']['schemas']['ReviewItem'])
         submission_schema['properties']['reviews'].update(minItems=len(t['target_ids']),maxItems=len(t['target_ids']))
     if t['type']=='research_synthesis':
-        submission_schema['properties']['paths']['items']=copy.deepcopy(app.openapi()['components']['schemas']['ResearchPath'])
+        def inline_schema(value):
+            if isinstance(value,dict):
+                if '$ref' in value:return inline_schema(copy.deepcopy(app.openapi()['components']['schemas'][value['$ref'].split('/')[-1]]))
+                return {k:inline_schema(v) for k,v in value.items()}
+            if isinstance(value,list):return [inline_schema(v) for v in value]
+            return value
+        submission_schema=inline_schema(submission_schema)
     if t['type']=='insight_explore':
         submission_schema['properties']['lean_target']=copy.deepcopy(app.openapi()['components']['schemas']['LeanTarget'])
         field=submission_schema['properties']['claims_problem_solved']
         field.update(enum=research_policy(problem)['allowed_completion_claims'],minimum=min(research_policy(problem)['allowed_completion_claims']))
-    from apps.api.modules.synthesis import active_plans,catalog
-    plans=active_plans(tx,problem['id'])
-    guidance=dict(latest=plans[-1] if plans else None,detail_url=PREFIX+'/api/v1/problems/'+problem['id']+'/research-guidance')
+    from apps.api.modules.synthesis import get_guide,catalog
+    current_guide=get_guide(tx,problem['id'])
+    guidance=dict(latest=current_guide,base_hash=current_guide['content_hash'],detail_url=PREFIX+'/api/v1/problems/'+problem['id']+'/research-guidance',file_url=PREFIX+'/api/v1/problems/'+problem['id']+'/research-guidance/file')
     synthesis_catalog=catalog(tx,problem['id'],PREFIX) if t['type']=='research_synthesis' else None
     insight_catalog=recommend(tx,problem['id'],PREFIX,surface='task_packages',sample_size=EXPLORATION_CATALOG_SIZE if t['type']=='insight_explore' else CATALOG_SIZE)
     return dict(lean_target=get_target(tx,target.get('insight_id',target['id'])) if t['type']=='lean_work' and target else None,research_guidance=guidance,synthesis_catalog=synthesis_catalog,collaboration_language='en',submission_language='en',historical_content_policy='Historical research remains in its original language. Submit all new explanatory prose in English; preserve mathematical notation, identifiers and original source titles.',research_policy=research_policy(problem),research_direction=t.get('research_direction'),completion_context=candidate_context,final_check_context=final_check,insight_catalog=insight_catalog,review_targets=[dict(insight_id=i,detail_url=PREFIX+'/api/v1/insights/'+i) for i in t.get('target_ids',[])],alternative_submission=alternative,repair_context=repair,problem=problem,goal=t.get('goal') or f"{t['type']} for {t.get('target_id') or problem['id']}",materials=materials,reviews=reviews,lean_environment=environment(PREFIX),lean_artifacts=code,prompt=prompt_for(t),submission=dict(method='POST',url=PREFIX+'/api/v1'+endpoint,schema=submission_schema,include_fields=['contributor_id','contributor_name','contributor_password','task_id','claim_token']))
@@ -342,10 +348,11 @@ def claim(body:Claim):
             if t['type']=='research_synthesis':
                 dispatch=states.get(t['problem_id'],{})
                 if not dispatch.get('synthesis_refill') or not dispatch.get('synthesis_room') or dispatch.get('synthesis_reserved'): continue
-                from apps.api.modules.synthesis import catalog,active_plans
+                from apps.api.modules.synthesis import catalog,get_guide
                 t['synthesis_insight_ids']=[i['id'] for i in catalog(tx,t['problem_id'])]
-                plans=active_plans(tx,t['problem_id'])
-                t['previous_plan_id']=plans[-1]['id'] if plans else None
+                guide=get_guide(tx,t['problem_id'])
+                t['synthesis_base_hash']=guide['content_hash']
+                t['previous_plan_id']=guide['id']
             token=secrets.token_urlsafe(32)
             if t['type'] in ('insight_explore',): t['research_direction']=assign_direction(need(tx,'problems',t['problem_id']))
             t.update(status='claimed',contributor_id=b['contributor_id'],contributor_name=b['contributor_name'],claim_hash=digest(token),expires_at=time.time()+3600,attempts=t['attempts']+1)
@@ -626,14 +633,33 @@ def post_research_plan(body:ResearchPlan,request:Request):
 
 @app.get('/api/v1/research-plans/{id}')
 def research_plan(id:str):
-    with store.transaction() as tx: return need(tx,'research_plans',id)
+    from apps.api.modules.synthesis import get_guide
+    with store.transaction() as tx:
+        need(tx,'problems',id)
+        return get_guide(tx,id)
 
 @app.get('/api/v1/problems/{id}/research-guidance')
 def research_guidance(id:str):
-    from apps.api.modules.synthesis import active_plans
+    from apps.api.modules.synthesis import get_guide
     with store.transaction() as tx:
-        need(tx,'problems',id);plans=active_plans(tx,id)
-        return dict(latest=plans[-1] if plans else None,items=plans)
+        guide=get_guide(tx,id)
+        return dict(latest=guide,current=guide,base_hash=guide['content_hash'],file_url=PREFIX+'/api/v1/problems/'+id+'/research-guidance/file')
+
+@app.post('/api/v1/problems/{id}/research-guidance')
+def update_research_guidance(id:str,body:ResearchPlan,request:Request):
+    if body.problem_id!=id:raise HTTPException(422,'Problem path and document must agree')
+    return post_research_plan(body,request)
+
+@app.get('/api/v1/problems/{id}/research-guidance/file',response_class=PlainTextResponse)
+def research_guidance_file(id:str):
+    from apps.api.modules.synthesis import get_guide
+    from apps.api.modules.guide_format import render_document
+    with store.transaction() as tx:guide=get_guide(tx,id)
+    return PlainTextResponse(render_document(guide['header'],guide['body_markdown']),media_type='text/markdown',headers={'ETag':'"'+guide['content_hash']+'"','Cache-Control':'no-cache'})
+
+@app.get('/api/v1/research-updates/{id}')
+def research_update(id:str):
+    with store.transaction() as tx:return need(tx,'research_updates',id)
 
 
 @app.get('/api/v1/platform-status')

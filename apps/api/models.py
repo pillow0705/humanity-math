@@ -118,29 +118,51 @@ class CredentialLogin(Strict):
 class CredentialChange(ContributorAction):
     new_password: str | None = Field(default=None,pattern=r'^[1-9][0-9]{7}$')
 
-class ResearchPath(Strict):
+class RoadmapNode(Strict):
+    id: str = Field(pattern=r'^[A-Za-z][A-Za-z0-9_-]{0,79}$')
+    kind: Literal['insight','lemma','goal']
+    statement: str = Field(default='',max_length=3000)
+    status: Literal['supported','conditional','missing','target']
+    insight_ids: list[str] = Field(default_factory=list,max_length=100)
+
+class RoadmapStep(Strict):
+    id: str = Field(pattern=r'^[A-Za-z][A-Za-z0-9_-]{0,79}$')
+    requires: list[str] = Field(min_length=1,max_length=100,description='All of these premises are needed together; separate steps to the same conclusion are alternatives')
+    concludes: str
+    explanation: str = Field(min_length=1,max_length=2000)
+
+class MissingBlock(Strict):
+    node_id: str
+    description: str = Field(min_length=1,max_length=2000)
+    next_step: str = Field(min_length=1,max_length=2000)
+
+class ProofGraph(Strict):
+    id: str = Field(pattern=r'^[A-Za-z][A-Za-z0-9_-]{0,79}$')
     title: str = Field(min_length=1,max_length=300)
-    strategy: str = Field(min_length=1,max_length=15000)
-    insight_ids: list[str] = Field(min_length=1,max_length=300)
-    proof_gaps: list[str] = Field(min_length=1,max_length=50)
-    difficulties: str = Field(min_length=1,max_length=15000)
-    next_steps: list[str] = Field(min_length=1,max_length=30)
+    approach: str = Field(min_length=1,max_length=2000)
+    goal_node_id: str
+    nodes: list[RoadmapNode] = Field(min_length=2,max_length=100)
+    steps: list[RoadmapStep] = Field(min_length=1,max_length=100)
+    missing: list[MissingBlock] = Field(default_factory=list,max_length=100)
+
+class GuideHeader(Strict):
+    format: Literal['humanity-proof-graphs-v1'] = 'humanity-proof-graphs-v1'
+    problem_id: str
+    graphs: list[ProofGraph] = Field(min_length=1,max_length=30,description='Multiple substantially different proof approaches; no four-route cap. Merge overlapping or cosmetically renamed routes.')
 
 class ResearchPlan(Submission):
-    model_config = ConfigDict(json_schema_extra={'x-max-body-characters':10000})
+    model_config = ConfigDict(json_schema_extra={'x-max-document-characters':40000})
     problem_id: str
-    title: str = Field(min_length=1,max_length=300)
-    summary: str = Field(min_length=1,max_length=20000)
-    paths: list[ResearchPath] = Field(min_length=1,max_length=30)
+    base_hash: str = Field(pattern=r'^[0-9a-f]{64}$',description='The shared guide hash supplied with this task; prevents overwriting another editor')
+    header: GuideHeader
+    body_markdown: str = Field(min_length=1,max_length=40000)
     task_id: str
     claim_token: str
     @model_validator(mode='after')
-    def concise_guide(self):
-        texts=[self.title,self.summary]
-        for path in self.paths:
-            texts.extend([path.title,path.strategy,path.difficulties,*path.proof_gaps,*path.next_steps])
-        if sum(len(text) for text in texts)>10000:
-            raise ValueError('Research guide body must contain at most 10000 Unicode characters across title, summary and every path text field, including spaces and formulas; IDs and JSON syntax are excluded. Keep only key conclusions, citations, proof gaps and next steps.')
+    def bounded_shared_document(self):
+        from apps.api.modules.guide_format import render_document,MAX_DOCUMENT_CHARS
+        if self.header.problem_id!=self.problem_id:raise ValueError('The document header must identify the same problem')
+        if len(render_document(self.header.model_dump(),self.body_markdown))>MAX_DOCUMENT_CHARS:raise ValueError('The complete research guide, including JSON graph header, IDs, formatting and Markdown, must not exceed 40000 Unicode characters')
         return self
 
 

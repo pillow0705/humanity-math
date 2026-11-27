@@ -2480,6 +2480,127 @@
             }
           }
         }
+      },
+      "post": {
+        "summary": "Update Research Guidance",
+        "operationId": "update_research_guidance_api_v1_problems__id__research_guidance_post",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResearchPlan"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/problems/{id}/research-guidance/file": {
+      "get": {
+        "summary": "Research Guidance File",
+        "operationId": "research_guidance_file_api_v1_problems__id__research_guidance_file_get",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/research-updates/{id}": {
+      "get": {
+        "summary": "Research Update",
+        "operationId": "research_update_api_v1_research_updates__id__get",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/platform-status": {
@@ -3202,6 +3323,37 @@
         ],
         "title": "CredentialLogin"
       },
+      "GuideHeader": {
+        "properties": {
+          "format": {
+            "type": "string",
+            "const": "humanity-proof-graphs-v1",
+            "title": "Format",
+            "default": "humanity-proof-graphs-v1"
+          },
+          "problem_id": {
+            "type": "string",
+            "title": "Problem Id"
+          },
+          "graphs": {
+            "items": {
+              "$ref": "#/components/schemas/ProofGraph"
+            },
+            "type": "array",
+            "maxItems": 30,
+            "minItems": 1,
+            "title": "Graphs",
+            "description": "Multiple substantially different proof approaches; no four-route cap. Merge overlapping or cosmetically renamed routes."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "problem_id",
+          "graphs"
+        ],
+        "title": "GuideHeader"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -3590,65 +3742,95 @@
         ],
         "title": "Lease"
       },
-      "ResearchPath": {
+      "MissingBlock": {
         "properties": {
+          "node_id": {
+            "type": "string",
+            "title": "Node Id"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Description"
+          },
+          "next_step": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Next Step"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "node_id",
+          "description",
+          "next_step"
+        ],
+        "title": "MissingBlock"
+      },
+      "ProofGraph": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,79}$",
+            "title": "Id"
+          },
           "title": {
             "type": "string",
             "maxLength": 300,
             "minLength": 1,
             "title": "Title"
           },
-          "strategy": {
+          "approach": {
             "type": "string",
-            "maxLength": 15000,
+            "maxLength": 2000,
             "minLength": 1,
-            "title": "Strategy"
+            "title": "Approach"
           },
-          "insight_ids": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "maxItems": 300,
-            "minItems": 1,
-            "title": "Insight Ids"
-          },
-          "proof_gaps": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "maxItems": 50,
-            "minItems": 1,
-            "title": "Proof Gaps"
-          },
-          "difficulties": {
+          "goal_node_id": {
             "type": "string",
-            "maxLength": 15000,
-            "minLength": 1,
-            "title": "Difficulties"
+            "title": "Goal Node Id"
           },
-          "next_steps": {
+          "nodes": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/RoadmapNode"
             },
             "type": "array",
-            "maxItems": 30,
+            "maxItems": 100,
+            "minItems": 2,
+            "title": "Nodes"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/RoadmapStep"
+            },
+            "type": "array",
+            "maxItems": 100,
             "minItems": 1,
-            "title": "Next Steps"
+            "title": "Steps"
+          },
+          "missing": {
+            "items": {
+              "$ref": "#/components/schemas/MissingBlock"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Missing"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
+          "id",
           "title",
-          "strategy",
-          "insight_ids",
-          "proof_gaps",
-          "difficulties",
-          "next_steps"
+          "approach",
+          "goal_node_id",
+          "nodes",
+          "steps"
         ],
-        "title": "ResearchPath"
+        "title": "ProofGraph"
       },
       "ResearchPlan": {
         "properties": {
@@ -3701,26 +3883,20 @@
             "type": "string",
             "title": "Problem Id"
           },
-          "title": {
+          "base_hash": {
             "type": "string",
-            "maxLength": 300,
-            "minLength": 1,
-            "title": "Title"
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Base Hash",
+            "description": "The shared guide hash supplied with this task; prevents overwriting another editor"
           },
-          "summary": {
+          "header": {
+            "$ref": "#/components/schemas/GuideHeader"
+          },
+          "body_markdown": {
             "type": "string",
-            "maxLength": 20000,
+            "maxLength": 40000,
             "minLength": 1,
-            "title": "Summary"
-          },
-          "paths": {
-            "items": {
-              "$ref": "#/components/schemas/ResearchPath"
-            },
-            "type": "array",
-            "maxItems": 30,
-            "minItems": 1,
-            "title": "Paths"
+            "title": "Body Markdown"
           }
         },
         "additionalProperties": false,
@@ -3731,12 +3907,12 @@
           "task_id",
           "claim_token",
           "problem_id",
-          "title",
-          "summary",
-          "paths"
+          "base_hash",
+          "header",
+          "body_markdown"
         ],
         "title": "ResearchPlan",
-        "x-max-body-characters": 10000
+        "x-max-document-characters": 40000
       },
       "Review": {
         "properties": {
@@ -3977,6 +4153,94 @@
           "score"
         ],
         "title": "ReviewItem"
+      },
+      "RoadmapNode": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,79}$",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "insight",
+              "lemma",
+              "goal"
+            ],
+            "title": "Kind"
+          },
+          "statement": {
+            "type": "string",
+            "maxLength": 3000,
+            "title": "Statement",
+            "default": ""
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "supported",
+              "conditional",
+              "missing",
+              "target"
+            ],
+            "title": "Status"
+          },
+          "insight_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Insight Ids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "status"
+        ],
+        "title": "RoadmapNode"
+      },
+      "RoadmapStep": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,79}$",
+            "title": "Id"
+          },
+          "requires": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Requires",
+            "description": "All of these premises are needed together; separate steps to the same conclusion are alternatives"
+          },
+          "concludes": {
+            "type": "string",
+            "title": "Concludes"
+          },
+          "explanation": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Explanation"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "requires",
+          "concludes",
+          "explanation"
+        ],
+        "title": "RoadmapStep"
       },
       "Solution": {
         "properties": {

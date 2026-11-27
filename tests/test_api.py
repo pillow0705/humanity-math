@@ -1010,10 +1010,10 @@ def test_research_synthesis_claim_submit_context_and_credit(client):
     claim=dispatch_claim(client)
     assert claim['task']['type']=='research_synthesis'
     assert len(claim['research_package']['synthesis_catalog'])==30
-    assert claim['research_package']['submission']['url'].endswith('/research-plans')
+    assert claim['research_package']['submission']['url'].endswith('/research-guidance')
     assert dispatch_claim(client,'3','Bob')['task']['type']!='research_synthesis'
-    path=dict(title='Descent',strategy='Combine the lemmas',insight_ids=[items[0]['id']],proof_gaps=['Show strict descent for all positive inputs'],difficulties='Uniformity in the input',next_steps=['Prove a uniform estimate'])
-    body=dict(contributor_id='2',contributor_name='Aster',problem_id='P001',task_id=claim['task']['id'],claim_token=claim['claim_token'],title='First guide',summary='Focus on uniform descent',paths=[path])
+    from test_research_guides import graph
+    body=dict(contributor_id='2',contributor_name='Aster',problem_id='P001',task_id=claim['task']['id'],claim_token=claim['claim_token'],base_hash=claim['research_package']['research_guidance']['base_hash'],header=dict(format='humanity-proof-graphs-v1',problem_id='P001',graphs=[graph(items[0]['id'])]),body_markdown='Focus on uniform descent.')
     bad=dict(body,claim_token='wrong')
     assert client.post('/api/v1/research-plans',json=bad).status_code==403
     result=client.post('/api/v1/research-plans',json=body,headers={'Idempotency-Key':'synthesis'});assert result.status_code==200,result.text
@@ -1027,15 +1027,15 @@ def test_research_synthesis_claim_submit_context_and_credit(client):
     assert dispatch_metrics(client)['synthesis_target']==3
     next_claim=dispatch_claim(client);assert next_claim['task']['previous_plan_id']==plan['id']
     assert client.post('/api/v1/research-plans',json=dict(body,task_id=next_claim['task']['id'],claim_token=next_claim['claim_token'])).status_code==409
-    assert client.post('/api/v1/contributors/2/submissions/research_plans/'+plan['id']+'/withdraw',json=dict(contributor_id='2',contributor_name='Aster')).status_code==200
-    assert client.get('/api/v1/problems/P001/research-guidance').json()['latest'] is None
+    assert client.post('/api/v1/contributors/2/submissions/research_updates/'+plan['update_id']+'/withdraw',json=dict(contributor_id='2',contributor_name='Aster')).status_code==200
+    assert client.get('/api/v1/problems/P001/research-guidance').json()['latest']['id']==plan['id']
 
 @pytest.mark.parametrize('n,done,previous,expected,target',[(100,4,False,True,7),(100,5,False,False,7),(100,5,True,True,7),(100,7,True,False,7),(0,0,True,False,0),(1,0,False,True,1)])
 def test_synthesis_thresholds(n,done,previous,expected,target):
     from types import SimpleNamespace
     from apps.api.modules.scheduling import snapshot
     class Tx:
-        def all(self,k): return [dict(id='D'+str(i),problem_id='P001',created_at=i) for i in range(done)] if k=='research_plans' else []
+        def all(self,k): return [dict(id='D'+str(i),problem_id='P001',created_at=i) for i in range(done)] if k=='research_updates' else []
         def get(self,k,i): return dict(synthesis_refill=previous) if k=='dispatch_states' else None
         def put(self,*args): pass
     scores=SimpleNamespace(objects={'insights':{str(i):dict(id=str(i),problem_id='P001',contributor_id='1') for i in range(n)},'lean_artifacts':{}},withdrawn=set(),superseded=set(),latest_reviews={},verifications={})
@@ -1228,30 +1228,3 @@ def test_insight_ranking_excludes_replaced_withdrawn_and_includes_lean_bonus(cli
     assert data['items'][0]['evaluation']['contribution_points']==20
     html=client.get('/').text
     assert 'data-tab="insight-ranking"' in html and 'id="tab-insight-ranking"' in html
-
-
-@pytest.mark.parametrize('length',[9999,10000,10001])
-def test_research_guide_total_character_limit(client,length):
-    i=client.post('/api/v1/insights',json=insight()).json()
-    claim=dispatch_claim(client,type='research_synthesis')
-    # Six characters outside strategy, including text in each list field.
-    path=dict(title='P',strategy='数'*(length-6),insight_ids=[i['id']],proof_gaps=['G'],difficulties='D',next_steps=['N'])
-    body=dict(contributor_id='2',contributor_name='Aster',problem_id='P001',task_id=claim['task']['id'],claim_token=claim['claim_token'],title='T',summary='S',paths=[path])
-    response=client.post('/api/v1/research-plans',json=body)
-    if length<=10000:
-        assert response.status_code==200,response.text
-    else:
-        assert response.status_code==422 and '10000 Unicode characters' in response.text
-        assert client.get('/api/v1/tasks/'+claim['task']['id']).json()['status']=='claimed'
-        with main.store.transaction() as tx:assert tx.all('research_plans')==[]
-    schema=client.get('/openapi.json').json()['components']['schemas']['ResearchPlan']
-    assert schema['x-max-body-characters']==10000
-
-
-def test_research_guide_limit_counts_every_path_and_text_field():
-    from apps.api.models import ResearchPlan
-    from pydantic import ValidationError
-    base=dict(contributor_id='1',contributor_name='Alice',problem_id='P001',task_id='T1',claim_token='token',title='T',summary='S',paths=[dict(title='P',strategy='S',insight_ids=['I1'],proof_gaps=['G'],difficulties='D',next_steps=['N'])])
-    for field in ['title','strategy','difficulties','proof_gaps','next_steps']:
-        extra=dict(base['paths'][0]);extra[field]=['x'*9999] if field in ('proof_gaps','next_steps') else 'x'*9999
-        with pytest.raises(ValidationError):ResearchPlan.model_validate(dict(base,paths=[base['paths'][0],extra]))

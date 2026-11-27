@@ -373,17 +373,27 @@ async function loadInsightGraph(problemId, generation) {
  finally{if(generation===state.generation)$('insight-network').setAttribute('aria-busy','false');}
 }
 
+function roadmapSvg(graph){
+ const nodes=new Map(graph.nodes.map(n=>[n.id,n])),parents=new Map(graph.nodes.map(n=>[n.id,new Set()])),levels=new Map();
+ graph.steps.forEach(s=>s.requires.forEach(id=>parents.get(s.concludes).add(id)));
+ const level=id=>{if(levels.has(id))return levels.get(id);const value=parents.get(id).size?1+Math.max(...[...parents.get(id)].map(level)):0;levels.set(id,value);return value;};
+ graph.nodes.forEach(n=>level(n.id));const rows=new Map(),positions=new Map();
+ graph.nodes.forEach(n=>{const col=levels.get(n.id),row=rows.get(col)||0;rows.set(col,row+1);positions.set(n.id,{x:24+col*250,y:24+row*112});});
+ const width=Math.max(580,...[...positions.values()].map(p=>p.x+205)),height=Math.max(150,...[...positions.values()].map(p=>p.y+94));
+ const marker='roadmap-arrow-'+graph.id;
+ let svg='<svg width="'+width+'" height="'+height+'" viewBox="0 0 '+width+' '+height+'" role="img" aria-label="'+esc(graph.title)+'"><defs><marker id="'+marker+'" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0 L7 3.5 L0 7 Z" fill="#9a8559"/></marker></defs>';
+ graph.steps.forEach((step,index)=>{const end=positions.get(step.concludes),join={x:end.x-38,y:end.y+36+(index%3-1)*14};step.requires.forEach(id=>{const start=positions.get(id);svg+='<path d="M'+(start.x+180)+' '+(start.y+36)+' L'+join.x+' '+join.y+'" class="roadmap-edge"/>';});svg+='<path d="M'+join.x+' '+join.y+' L'+end.x+' '+(end.y+36)+'" class="roadmap-edge" marker-end="url(#'+marker+')"/><circle cx="'+join.x+'" cy="'+join.y+'" r="9" fill="#fffaf0" stroke="#b7a47c"/><text x="'+join.x+'" y="'+(join.y+4)+'" text-anchor="middle" font-size="11">'+(step.requires.length>1?'∧':'·')+'</text>';});
+ graph.nodes.forEach(n=>{const p=positions.get(n.id),missing=n.status==='missing',goal=n.kind==='goal',fill=missing?'#f8e2d8':goal?'#f3e2a8':'#eef0e7';const text=n.statement.replace(/\s+/g,' ');svg+='<g><title>'+esc(n.id+': '+n.statement)+'</title><rect x="'+p.x+'" y="'+p.y+'" width="180" height="76" rx="10" fill="'+fill+'" stroke="'+(missing?'#bf8067':'#b8ab89')+'"'+(missing?' stroke-dasharray="5 3"':'')+'/><text x="'+(p.x+10)+'" y="'+(p.y+18)+'" font-size="10" fill="#776648">'+esc(n.id+(missing?' · Missing':''))+'</text><text x="'+(p.x+10)+'" y="'+(p.y+38)+'" font-size="11">'+esc(text.slice(0,24))+'</text><text x="'+(p.x+10)+'" y="'+(p.y+56)+'" font-size="11">'+esc(text.slice(24,47)+(text.length>47?'…':''))+'</text></g>';});
+ return svg+'</svg>';
+}
 async function researchGuidanceDialog(){
- if(!state.problem)return;
  const en=window.UI?.lang==='en',t=(zh,english)=>en?english:zh;
- const gen=showDialog(t('研究指引','Research guidance'),'<p>'+t('正在读取研究指引…','Loading research guidance…')+'</p>');
+ const gen=showDialog(t('公共证明路线图','Shared proof roadmap'),'<p>'+t('正在读取研究指引…','Loading research guidance…')+'</p>');
  try{
-  const data=await api('/problems/'+state.problem.id+'/research-guidance');
-  if(gen!==dialogGeneration)return;
-  const plan=data.latest;
-  if(!plan){$('dialog-content').textContent=t('首份研究指引正在等待路线挖掘任务提交。','The first research guide awaits a research synthesis submission.');return;}
-  $('dialog-title').textContent=plan.title;
-  $('dialog-content').innerHTML='<p>'+author(plan)+'</p><div class="prose math">'+esc(plan.summary)+'</div>'+plan.paths.map(path=>'<section class="detail-section"><h3>'+esc(path.title)+'</h3><div class="prose math">'+esc(path.strategy)+'</div>'+referenceButtons(path.insight_ids)+'<h4>'+t('证明缺口','Proof gaps')+'</h4><div class="prose math">'+esc(path.proof_gaps.join('\n\n'))+'</div><h4>'+t('主要困难','Difficulties')+'</h4><div class="prose math">'+esc(path.difficulties)+'</div><h4>'+t('下一步目标','Next steps')+'</h4><div class="prose math">'+esc(path.next_steps.join('\n\n'))+'</div></section>').join('');
+  const data=await api('/problems/'+state.problem.id+'/research-guidance');if(gen!==dialogGeneration)return;
+  const guide=data.current||data.latest,graphs=guide?.header?.graphs||[];
+  if(!graphs.length){$('dialog-content').textContent=t('本题的公共路线文件尚未绘制。补命题阶段完成后，路线 Agent 会开始共同维护。','The shared roadmap is empty. Research-synthesis agents will maintain it after target registration.');return;}
+  $('dialog-content').innerHTML='<div class="detail-meta"><span>'+esc(guide.updated_by||'')+'</span><a href="'+esc(data.file_url)+'" target="_blank" rel="noopener">'+t('查看公共文件','Read shared file')+'</a></div><p>'+t('每个问题一份公共文件。粉色虚线表示 Missing；∧ 表示前提同时成立。图中的方案由 Agent 提出，正式结题仍以 Lean 验证为准。','One shared file per problem. Dashed pink nodes are missing; ∧ means all premises are required. Roadmaps are agent proposals; closure requires Lean verification.')+'</p>'+graphs.map((g,index)=>'<details class="roadmap-card" '+(index===0?'open':'')+'><summary>'+esc(g.title)+'</summary><p class="prose math">'+esc(g.approach)+'</p><div class="roadmap-canvas">'+roadmapSvg(g)+'</div><h4>Missing</h4>'+(g.missing.length?g.missing.map(m=>'<p><strong>'+esc(m.node_id)+'</strong> · '+esc(m.description)+'<br>'+esc(m.next_step)+'</p>').join(''):'<p>'+t('未列出缺口；请核对推导与原问题的联系。','No gap listed; inspect the proposed deductions against the original goal.')+'</p>')+'<details><summary>'+t('完整命题与推导','Full statements and deductions')+'</summary>'+g.nodes.map(n=>'<div class="review"><strong>'+esc(n.id)+'</strong><div class="prose math">'+esc(n.statement)+'</div>'+referenceButtons(n.insight_ids)+'</div>').join('')+g.steps.map(s=>'<p><strong>'+esc(s.requires.join(' ∧ ')+' → '+s.concludes)+'</strong><br>'+esc(s.explanation)+'</p>').join('')+'</details></details>').join('')+'<section class="detail-section"><h3>'+t('文字说明','Explanation')+'</h3><div class="guide-explanation prose math">'+esc(guide.body_markdown)+'</div></section>';
   math($('dialog-content'));bindDetailActions();
  }catch(e){errorMessage(e.message);}
 }

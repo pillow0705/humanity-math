@@ -43,7 +43,7 @@ def finish_task(tx, body, expected, target, problem_id, result_id):
     t.update(status='submitted',result_id=result_id,submitted_at=time.time()); tx.put('tasks',t)
 
 def contribute(tx, obj, kind):
-    tx.new('contributions','C',dict(contributor_id=obj['contributor_id'],object_id=obj['id'],kind=kind,problem_id=obj['problem_id'],score=None,object_kind='lean_artifacts' if obj['id'].startswith('L') else 'audits' if obj['id'].startswith('U') else {'review':'reviews','solution':'solutions','research_synthesis':'research_plans','lean_target':'target_batches'}.get(kind,kind)))
+    tx.new('contributions','C',dict(contributor_id=obj['contributor_id'],object_id=obj['id'],kind=kind,problem_id=obj['problem_id'],score=None,object_kind='lean_artifacts' if obj['id'].startswith('L') else 'audits' if obj['id'].startswith('U') else {'review':'reviews','solution':'solutions','research_synthesis':'research_updates','lean_target':'target_batches'}.get(kind,kind)))
 
 def clean(body): return {k:v for k,v in body.items() if k not in ('claim_token','lean','contributor_password','new_password')}
 
