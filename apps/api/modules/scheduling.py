@@ -57,6 +57,8 @@ def sync_schedule(tx,problem_id=None):
     states={}
     for p in tx.all('problems'):
         if p['status']!='open' or (problem_id and p['id']!=problem_id):continue
+        from apps.api.modules.target_maintenance import sync as sync_targets
+        sync_targets(tx,p['id'])
         state,insights,counts,passed,pending,reserved=snapshot(tx,p['id'],scores);states[p['id']]=state
         tasks=tx.all('tasks')
         for t in tasks:
@@ -98,7 +100,7 @@ def dispatch_priority(tx,t,states,priority,automatic=True,cache=None):
     """None means no useful capacity; lower integer wins."""
     from apps.api.modules.migration import active
     if active(tx):return -10 if t['type']=='lean_target' and available(t) else None
-    if t['type']=='lean_target':return None
+    if t['type']=='lean_target':return 2 if available(t) and states.get(t['problem_id']) else None
     state=states.get(t['problem_id'])
     if not state or not available(t):return None
     if t['type']=='research_synthesis':
@@ -121,3 +123,27 @@ def dispatch_priority(tx,t,states,priority,automatic=True,cache=None):
     if t['type']=='review':
         return 1 if state['review_room']>0 and (state['review_refill'] or not automatic) else None
     return 3 if t['type']=='insight_explore' else None
+
+
+# Smooth weighted round robin over currently useful work. Idle classes accumulate
+# no backlog, and final-proof-chain work retains its existing urgent priority.
+DISPATCH_WEIGHTS={'insight_explore':40,'lean_target:register':15,'lean_target:alignment':10,'lean_work':20,'review':10,'research_synthesis':5}
+def dispatch_key(t):
+    return 'lean_target:'+('alignment' if t.get('mode')=='alignment' else 'register') if t['type']=='lean_target' else t['type']
+
+def fair_order(tx,options,priority):
+    def score(t):
+        state=tx.get('dispatch_credits',t['problem_id']) or {}
+        credits=state.get('credits',{});key=dispatch_key(t)
+        ident=t.get('target_id')
+        if t['type']=='lean_work' and t.get('mode')=='audit':ident=(tx.get('lean_artifacts',ident) or {}).get('insight_id')
+        urgent=t['type']=='lean_work' and ident in priority
+        return (not urgent,-priority.get(ident,0) if urgent else 0,-(credits.get(key,0)+DISPATCH_WEIGHTS[key]),t['created_at'],t['id'])
+    return sorted(options,key=score)
+
+def record_dispatch(tx,selected,options):
+    pid=selected['problem_id'];keys={dispatch_key(t) for t in options if t['problem_id']==pid}
+    old=(tx.get('dispatch_credits',pid) or {}).get('credits',{})
+    credits={key:old.get(key,0)+DISPATCH_WEIGHTS[key] for key in keys}
+    key=dispatch_key(selected);credits[key]-=sum(DISPATCH_WEIGHTS[k] for k in keys)
+    tx.put('dispatch_credits',dict(id=pid,credits=credits,last_type=selected['type'],last_mode=selected.get('mode'),updated_at=time.time()))

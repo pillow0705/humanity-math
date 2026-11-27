@@ -187,7 +187,7 @@ def check_next_target():
         target=None
         for candidate in sorted(queued,key=lambda x:(x.get('created_at',0),x['id'])):
             dependencies=[(snapshot,tx.get('insight_targets',snapshot['insight_id'])) for snapshot in candidate.get('insight_dependency_snapshot',[])]
-            broken=any(not current or current['target_hash']!=snapshot['target_hash'] or current['status']=='invalid' for snapshot,current in dependencies)
+            broken=any(not current or current['target_hash']!=snapshot['target_hash'] or current['status'] in ('invalid','revoked','stale') for snapshot,current in dependencies)
             if broken:
                 candidate.update(status='invalid',finished_at=time.time(),log='A frozen target-definition dependency is invalid or has changed. Correct this target in a new migration batch after its prerequisite is valid.')
                 tx.put('insight_targets',candidate);return True
@@ -205,7 +205,7 @@ def check_next_target():
     except Exception as exc:result=dict(status='error',log=str(exc)[-10000:])
     with STORE.transaction() as tx:
         current=need(tx,'insight_targets',target['id'])
-        if current['target_hash']!=target['target_hash']:raise RuntimeError('Immutable Insight target changed during checking')
+        if current['target_hash']!=target['target_hash'] or current['status']!='checking':return True
         current.update(result,finished_at=time.time());tx.put('insight_targets',current)
         from apps.api.modules.migration import sync
         sync(tx)
@@ -251,7 +251,7 @@ def once():
     with STORE.transaction() as tx:
         collection='verifications' if kind=='verification' else 'solutions'
         current=need(tx,collection,v['id'])
-        if current['status']=='cancelled' or (kind=='verification' and withdrawn(tx,'lean_artifacts',a['id'])) or (kind=='solution' and (withdrawn(tx,'solutions',v['id']) or (v.get('automatic') and withdrawn(tx,'insights',v['insight_id'])))):
+        if current['status']!='running' or (kind=='verification' and withdrawn(tx,'lean_artifacts',a['id'])) or (kind=='solution' and (withdrawn(tx,'solutions',v['id']) or (v.get('automatic') and withdrawn(tx,'insights',v['insight_id'])))):
             sync_candidates(tx);return True
         if kind=='solution' and result['status']=='verified':
             current_problem=need(tx,'problems',v['problem_id'])

@@ -28,10 +28,10 @@ def body(**updates):
                      lean_target=dict(expression='True')), **updates)
 
 
-def test_registered_target_is_required_queued_and_immutable(target_client):
+def test_optional_target_is_queued_and_immutable_when_supplied(target_client):
     client = target_client
-    missing = body(); missing.pop('lean_target')
-    assert client.post('/api/v1/insights', json=missing).status_code == 422
+    missing = body(title='Without formal target'); missing.pop('lean_target')
+    assert client.post('/api/v1/insights', json=missing).status_code == 200
     result = client.post('/api/v1/insights', json=body())
     assert result.status_code == 200, result.text
     insight_obj = result.json()
@@ -75,17 +75,14 @@ def test_legacy_owner_can_register_once_without_new_credit(target_client):
         assert tx.all('contributions') == []
 
 
-def test_review_checks_alignment_and_records_exact_target_hash(target_client):
-    client = target_client
-    insight = client.post('/api/v1/insights', json=body()).json()
-    path = '/api/v1/insights/'+insight['id']+'/reviews'
-    review = dict(contributor_id='2', contributor_name='Bob', verdict='support', rationale='Checked all quantifiers.', score=4)
-    assert client.post(path, json=review).status_code == 422
-    assert client.post(path, json=dict(review, target_alignment='aligned', target_hash='0'*64)).status_code == 409
-    result = client.post(path, json=dict(review, target_alignment='misaligned'))
-    assert result.status_code == 200
-    assert result.json()['target_alignment'] == 'misaligned'
-    assert result.json()['target_hash'] == insight['lean_target']['target_hash']
+def test_review_no_longer_requires_or_counts_target_alignment(target_client):
+    client=target_client
+    obj=client.post('/api/v1/insights',json=body()).json()
+    review=dict(contributor_id='2',contributor_name='Bob',verdict='support',rationale='Deep reusable argument.',score=4)
+    result=client.post('/api/v1/insights/'+obj['id']+'/reviews',json=dict(review,target_alignment='misaligned',target_hash='0'*64))
+    assert result.status_code==200
+    assert result.json()['target_alignment']=='not_applicable' and result.json()['target_hash'] is None
+    with main.store.transaction() as tx:assert tx.all('target_audits')==[]
 
 
 def test_batch_review_alignment_is_atomic(target_client):
@@ -98,14 +95,10 @@ def test_batch_review_alignment_is_atomic(target_client):
     items = [dict(insight_id=i['id'], verdict='support', rationale='Checked.', score=4, target_alignment='aligned') for i in insights]
     items[-1].pop('target_alignment')
     payload = dict(contributor_id='2', contributor_name='Bob', task_id=task['id'], claim_token='lease', reviews=items)
-    assert client.post('/api/v1/reviews/batch', json=payload).status_code == 422
-    with main.store.transaction() as tx:
-        assert tx.all('reviews') == [] and tx.get('tasks', task['id'])['status'] == 'claimed'
-    items[-1]['target_alignment'] = 'uncertain'
     result = client.post('/api/v1/reviews/batch', json=payload)
     assert result.status_code == 200, result.text
-    assert [r['target_alignment'] for r in result.json()['items']] == ['aligned', 'uncertain']
-    assert all(r['target_hash'] == i['lean_target']['target_hash'] for r, i in zip(result.json()['items'], insights))
+    assert [r['target_alignment'] for r in result.json()['items']] == ['not_applicable', 'not_applicable']
+    assert all(r['target_hash'] is None for r in result.json()['items'])
 
 
 def test_target_snapshot_and_bundle_include_frozen_source(target_client):

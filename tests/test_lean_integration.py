@@ -329,3 +329,29 @@ def test_migration_batch_imports_targets_in_dependency_order(tmp_path,monkeypatc
     for _ in range(3):assert worker.once()
     assert c.get('/api/v1/platform-status').json()['phase']=='normal'
     assert c.get('/api/v1/contributors/1/score').json()['score']==8
+
+
+@pytest.mark.skipif(os.environ.get('RUN_LEAN_TESTS')!='1',reason='Requires Docker and the pinned Lean toolchain')
+def test_revoked_target_repair_reuses_insight_but_not_old_proof(tmp_path,monkeypatch):
+    s=Store(tmp_path);(tmp_path/'artifacts').mkdir()
+    monkeypatch.setattr(main,'store',s);monkeypatch.setattr(worker,'STORE',s);monkeypatch.setattr(worker,'CACHE',tmp_path/'artifacts/cache')
+    with s.transaction() as tx:tx.put('problems',dict(id='PREV',title='Revision test',statement='True',created_at=1,status='open'))
+    c=TestClient(main.app)
+    for name in ['Author','Auditone','Audittwo','Repairer']:c.post('/api/v1/contributors/claim',json={'name':name})
+    i=post_insight(c,dict(contributor_id='1',contributor_name='Author',problem_id='PREV',title='Formal contract',claim='A precise equality',proof='Test only',proof_status='claimed_complete')).json()
+    def prove(source,name):
+        r=c.post('/api/v1/lean/artifacts',json=dict(contributor_id='1',contributor_name='Author',insight_id=i['id'],source=source,theorem=name))
+        assert r.status_code==200,r.text
+        a=r.json();assert worker.once();return a,c.get('/api/v1/lean/verifications/'+a['verification_id']).json()
+    a,v=prove('theorem original : True := True.intro','original');assert v['status']=='passed',v
+    for ident,name in [('2','Auditone'),('3','Audittwo')]:
+        r=c.post('/api/v1/insights/'+i['id']+'/lean-target/audits',json=dict(contributor_id=ident,contributor_name=name,target_hash=i['lean_target']['target_hash'],alignment='misaligned',rationale='The old target omits the claimed equality.'))
+        assert r.status_code==200,r.text
+    assert c.get('/api/v1/lean/artifacts/'+a['id']).json()['interface']['reusable'] is False
+    claim=c.post('/api/v1/tasks/claim',json=dict(contributor_id='4',contributor_name='Repairer',problem_id='PREV',type='lean_target')).json()
+    r=c.post('/api/v1/lean-targets/batch',json=dict(contributor_id='4',contributor_name='Repairer',task_id=claim['task']['id'],claim_token=claim['claim_token'],targets=[dict(insight_id=i['id'],lean_target=dict(expression='1 = 1'))]))
+    assert r.status_code==200,r.text
+    assert worker.once()
+    assert c.get('/api/v1/insights/'+i['id']+'/lean-target').json()['status']=='valid'
+    _,wrong=prove('theorem oldAgain : True := True.intro','oldAgain');assert wrong['status']=='failed',wrong
+    _,correct=prove('theorem fixed : 1 = 1 := rfl','fixed');assert correct['status']=='passed',correct

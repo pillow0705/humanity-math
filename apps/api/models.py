@@ -24,7 +24,7 @@ class LeanTarget(Strict):
     insight_dependencies: list[str] = Field(default_factory=list,max_length=100,description='Insight IDs whose valid fixed target definitions are imported; these imports do not supply proofs')
 
 class Insight(Submission):
-    lean_target: LeanTarget
+    lean_target: LeanTarget | None = None
 
     is_prerequisite: bool = Field(default=False,strict=True,description='True only for a supporting lemma registered for the current exploration task: no separate insight base points; it does not complete the task')
     claims_problem_solved: int = Field(default=0,ge=-1,le=1,strict=True,description='Completion claim only: 0 for all intermediate insights; 1 for a complete proof of the original problem P; -1 for a complete proof of its negation. Independent of assigned research direction; not verification.')
@@ -45,8 +45,8 @@ class Insight(Submission):
         return self
 TargetAlignment = Literal['aligned','misaligned','uncertain','not_applicable']
 class Review(Submission):
-    target_alignment: TargetAlignment = Field(default='not_applicable',description='Required for an insight with a registered Lean target: does it faithfully express the mathematical claim?')
-    target_hash: str | None = Field(default=None,pattern=r'^[0-9a-f]{64}$',description='Optional expected immutable target hash; the server records the actual hash with the review')
+    target_alignment: TargetAlignment = Field(default='not_applicable',description='Deprecated compatibility field, ignored by mathematical Reviews; use the dedicated Lean target alignment endpoint.')
+    target_hash: str | None = Field(default=None,pattern=r'^[0-9a-f]{64}$',description='Deprecated compatibility field, ignored by mathematical Reviews')
     verdict: Literal['support','concern','refute','needs_work']
     rationale: str = Field(min_length=1, max_length=30000)
     score: int = Field(ge=0, le=5, strict=True, description='0 only for non-mathematical or wholly unrelated content: an independent zero review immediately trashes the insight. Otherwise 1–5; not a proof certificate')
@@ -187,3 +187,20 @@ class LeanTargetBatch(ContributorAction):
 
 class BoardMessage(ContributorAction):
     body: str = Field(min_length=1,max_length=1000,description='A short human message; Chinese and English are both welcome. No contribution points are awarded.')
+
+
+class TargetAuditItem(Strict):
+    insight_id: str = Field(pattern=r'^I[A-Za-z0-9_-]{1,99}$')
+    target_hash: str = Field(pattern=r'^[0-9a-f]{64}$')
+    alignment: Literal['aligned','misaligned','uncertain']
+    rationale: str = Field(min_length=1,max_length=30000)
+
+class TargetAuditBatch(ContributorAction):
+    task_id: str
+    claim_token: str
+    audits: list[TargetAuditItem] = Field(min_length=1,max_length=5)
+
+class TargetAudit(ContributorAction):
+    target_hash: str = Field(pattern=r'^[0-9a-f]{64}$')
+    alignment: Literal['aligned','misaligned','uncertain']
+    rationale: str = Field(min_length=1,max_length=30000)
