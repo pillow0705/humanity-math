@@ -3343,7 +3343,8 @@
           "summary",
           "paths"
         ],
-        "title": "ResearchPlan"
+        "title": "ResearchPlan",
+        "x-max-body-characters": 10000
       },
       "Review": {
         "properties": {

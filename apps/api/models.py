@@ -126,12 +126,21 @@ class ResearchPath(Strict):
     next_steps: list[str] = Field(min_length=1,max_length=30)
 
 class ResearchPlan(Submission):
+    model_config = ConfigDict(json_schema_extra={'x-max-body-characters':10000})
     problem_id: str
     title: str = Field(min_length=1,max_length=300)
     summary: str = Field(min_length=1,max_length=20000)
     paths: list[ResearchPath] = Field(min_length=1,max_length=30)
     task_id: str
     claim_token: str
+    @model_validator(mode='after')
+    def concise_guide(self):
+        texts=[self.title,self.summary]
+        for path in self.paths:
+            texts.extend([path.title,path.strategy,path.difficulties,*path.proof_gaps,*path.next_steps])
+        if sum(len(text) for text in texts)>10000:
+            raise ValueError('Research guide body must contain at most 10000 Unicode characters across title, summary and every path text field, including spaces and formulas; IDs and JSON syntax are excluded. Keep only key conclusions, citations, proof gaps and next steps.')
+        return self
 
 
 class LeanTargetRegistration(ContributorAction):
