@@ -1265,3 +1265,11 @@ def test_activity_score_exactly_thirty_has_no_milestone(client):
         for n in range(20):
             tx.put('insights',dict(id='Icite'+str(n),problem_id='P001',title='Lemma',created_at=1,contributor_id='2',references=[item['id']]))
     assert not any(e['event']=='insight_score_30' for e in client.get('/api/v1/activity?limit=50').json()['items'])
+
+
+def test_configured_lean_memory_is_exposed():
+    import os, subprocess, sys, json
+    env=dict(os.environ,LEAN_MEMORY_MB='6144')
+    code="import json;from apps.api.modules.lean import environment;print(json.dumps(environment()))"
+    result=json.loads(subprocess.check_output([sys.executable,'-c',code],env=env,text=True))
+    assert result['limits']['container_memory_mb']==6144

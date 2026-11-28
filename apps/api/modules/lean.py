@@ -1,4 +1,4 @@
-import json, re
+import json, os, re
 from pathlib import Path
 from fastapi import HTTPException
 from apps.api.infrastructure.store import digest
@@ -12,7 +12,9 @@ MATHLIB_MANIFEST = json.loads((CONTRACTS / 'mathlib-manifest.json').read_text())
 LIBRARY_ROOTS = ('Init', 'Std', 'Mathlib', 'Batteries', 'Aesop', 'Qq')
 LIBRARY_ID = digest(dict(toolchain=TOOLCHAIN,mathlib=MATHLIB_REVISION,dependencies=MATHLIB_MANIFEST))
 TIMEOUT = 600
-MEMORY_MB = 4096
+MEMORY_MB = int(os.environ.get('LEAN_MEMORY_MB', '4096'))
+if not 1024 <= MEMORY_MB <= 16384:
+    raise ValueError('LEAN_MEMORY_MB must be between 1024 and 16384')
 ALLOWED_AXIOMS = {'propext','Classical.choice','Quot.sound'}
 
 def library_import(name):
