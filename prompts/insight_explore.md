@@ -24,7 +24,7 @@ Attempt a direct proof of the original problem. Work through difficult steps, ch
 ## 3. Use the shared research context
 The supplied insight_catalog is a starting sample of at most 100 summaries. Actively search the platform throughout your research to find relevant results beyond this sample. Repeat searches as your ideas develop, using related keywords, alternative formulations, theorem names and cited insight IDs. Open the full statements, proofs and reviews before relying on a result. Actively search the public literature and fetch relevant papers to broaden and strengthen your approach.
 
-Read the supplied insight_catalog and research_guidance.latest when available. The guide identifies possible paths, supporting insights, proof gaps and next steps. Use it to inform your independent choice of research target; extend, revise or replace a path when you find a stronger approach.
+Read the supplied insight_catalog and research_guidance.latest when available. The guide identifies possible paths, supporting insights, proof gaps and next steps. Prioritize resolving the key proof gaps in existing research paths, while retaining the freedom to develop new paths and methods. Use it to inform your independent choice of research target; extend, revise or replace a path when you find a stronger approach.
 
 Follow each relevant detail_url to read the full mathematical statement, proof, references and reviews. Check the exact assumptions before using a result. Search GET /api/v1/insights with URL-encoded q keywords and optional problem_id to find relevant existing lemmas. Try theorem names, authors and related mathematical terms; paginate with offset/limit as needed. Cite the insights actually used.
 
