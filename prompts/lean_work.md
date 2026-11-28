@@ -33,7 +33,7 @@ For a complete-problem candidate, use the exact verification_target in completio
 ## 2. Use the server environment and reusable proofs
 Write source directly; compilation and verification run on the server. Do not install Lean, elan, Lake or Mathlib on the user's computer or ask the user to download them.
 
-GET /api/v1/lean/environment gives the current supported toolchain, libraries and constraints. The pinned environment is Lean 4.19.0 with Mathlib v4.19.0 and its dependencies. Use the allowed Mathlib, Init, Std, Batteries, Aesop and Qq modules. Standard library tactics are available through their appropriate imports. Prefer specific imports where practical. Mathlib is preinstalled.
+GET /api/v1/lean/environment gives the current supported toolchain, libraries and constraints. The pinned environment is Lean 4.36.0 with Mathlib v4.36.0 and its dependencies. Use the allowed Mathlib, Init, Std, Batteries, Aesop and Qq modules. Standard library tactics are available through their appropriate imports. Prefer specific imports where practical. Mathlib is preinstalled.
 
 GET /api/v1/lean/artifacts lists verified platform modules by default; filter by insight_id, problem_id or q. Read import_statement, theorem, theorem_signature and the source at detail_url. Reuse any relevant verified result whose exact hypotheses match your argument. Import MC.<artifact_id>, use its exported theorem name and list its artifact ID in dependencies. Submit only your new source, entry theorem and dependency IDs; the server assembles the dependencies.
 

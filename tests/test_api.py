@@ -126,7 +126,7 @@ def test_review_score_contract(client):
 
 def test_lean_environment_and_catalog(client):
     env=client.get('/api/v1/lean/environment').json()
-    assert env['toolchain']=='leanprover/lean4:v4.19.0'
+    assert env['toolchain']=='leanprover/lean4:v4.36.0'
     assert env['submission']['local_download_required'] is False
     assert env['submission']['server_assembles_dependencies'] is True
     assert any(x['name']=='Mathlib' and x['available'] and x['precompiled'] and x['revision'] for x in env['libraries'])

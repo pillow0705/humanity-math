@@ -5,10 +5,10 @@ This checks installation inputs; run the real Lean integration tests before roll
 """
 import json, os, subprocess, time
 from pathlib import Path
-from apps.api.modules.lean import MATHLIB_MANIFEST, MATHLIB_REVISION, LIBRARY_ID, TOOLCHAIN
+from apps.api.modules.lean import MATHLIB_MANIFEST, MATHLIB_REVISION, MATHLIB_VERSION, LIBRARY_ID, TOOLCHAIN
 from apps.api.infrastructure.store import atomic
 
-root=Path(os.environ.get('MATHLIB_HOME',Path(__file__).resolve().parents[1]/'tools/mathlib-v4.19.0'))
+root=Path(os.environ.get('MATHLIB_HOME',Path(__file__).resolve().parents[1] / 'tools' / f'mathlib-{MATHLIB_VERSION}'))
 
 def check_git(path,revision):
     actual=subprocess.check_output(['git','-C',str(path),'rev-parse','HEAD'],text=True).strip()

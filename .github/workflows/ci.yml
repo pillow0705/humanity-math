@@ -75,7 +75,7 @@ jobs:
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: tools
-          key: lean-4.19.0-mathlib-c44e0c8-${{ runner.os }}-${{ runner.arch }}-v1
+          key: lean-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('apps/api/lean_config.py', 'contracts/mathlib-manifest.json', 'deploy/Dockerfile.lean') }}
       - name: Install pinned Lean and Mathlib
         run: PATH="$PWD/.venv/bin:$PATH" bash deploy/ci/setup-lean.sh
       - name: Verify real proofs in isolated storage

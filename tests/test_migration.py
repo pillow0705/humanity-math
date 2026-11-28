@@ -113,3 +113,51 @@ def test_existing_three_item_lease_survives_larger_batch_setting(client,monkeypa
     assert response.status_code==200,response.text
     validate_targets()
     assert client.get('/api/v1/contributors/1/score').json()['score']==8
+
+
+def test_lean_environment_migration_preserves_history_and_requeues_definitions(client):
+    from apps.api.modules.lean import LIBRARY_ID, bundle_mathlib
+    from apps.api.modules.targets import definition_closure
+    from deploy.migrate_lean_environment import migrate
+
+    with main.store.transaction() as tx:
+        child = tx.get('insights', 'I1')
+        child['references'] = ['I0']
+        tx.put('insights', child)
+        for ident in ('I0', 'I1', 'I2'):
+            root_reference = [dict(insight_id='I0', target_hash='old-I0')] if ident == 'I1' else []
+            tx.put('insight_targets', dict(
+                id=ident, insight_id=ident, library_id='old', status='valid', target_hash='old-'+ident,
+                expression='True', definitions='', registered_by='1', alignment_flags=int(ident == 'I2'),
+                insight_dependencies=[s['insight_id'] for s in root_reference],
+                insight_dependency_snapshot=root_reference,
+            ))
+        tx.put('lean_artifacts', dict(id='Lold', insight_id='I0', library_id='old', verification_id='Vold'))
+        tx.put('verifications', dict(id='Vold', artifact_id='Lold', status='queued', log='waiting'))
+        tx.put('tasks', dict(id='Told', type='lean_work', status='claimed'))
+        tx.put('tasks', dict(id='Treview', type='review', status='claimed'))
+
+    with main.store.transaction() as tx:
+        result = migrate(tx)
+        assert result == dict(requeued_targets=2, targets_needing_repair=1, cancelled_checks=1, closed_leases=1)
+        root, child = (tx.get('insight_targets', ident) for ident in ('I0', 'I1'))
+        assert root['library_id'] == child['library_id'] == LIBRARY_ID
+        assert root['status'] == child['status'] == 'queued'
+        assert root['registered_by'] == child['registered_by'] == '1'
+        assert child['insight_dependency_snapshot'][0]['target_hash'] == root['target_hash']
+        assert tx.get('target_versions', 'old-I0')['status'] == 'valid'
+        old_child = tx.get('target_versions', 'old-I1')
+        assert [target['target_hash'] for target in definition_closure(tx, old_child)] == ['old-I0', 'old-I1']
+        assert tx.get('insight_targets', 'I2')['status'] == 'stale'
+        assert tx.get('lean_artifacts', 'Lold')['library_id'] == 'old'
+        assert tx.get('verifications', 'Vold')['status'] == 'cancelled'
+        assert tx.get('tasks', 'Told')['status'] == 'closed'
+        assert tx.get('tasks', 'Treview')['status'] == 'claimed'
+        assert not tx.all('contributions')
+
+    with main.store.transaction() as tx:
+        assert migrate(tx)['already_applied'] is True
+        assert not tx.writes
+
+    revision, _ = bundle_mathlib('leanprover/lean4:v4.19.0')
+    assert revision == 'c44e0c8ee63ca166450922a373c7409c5d26b00b'

@@ -6,7 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from apps.api.infrastructure.store import Store, digest
 from apps.api.models import Insight, Review, ReviewBatch, Claim, Lease, Artifact, Audit, Solution, ContributorClaim, ContributorAction, CredentialLogin, CredentialChange, ResearchPlan, LeanTargetRegistration, LeanTargetBatch, BoardMessage, TargetAuditBatch, TargetAudit
 from apps.api.modules.core import need, find_content, public_task, create_content, clean, finish_task, contribute, check_supersedes, supported_task
-from apps.api.modules.lean import create_artifact, closure, environment, artifact_summary, MATHLIB_REVISION, bundle_manifest
+from apps.api.modules.lean import create_artifact, closure, environment, artifact_summary, bundle_mathlib, bundle_manifest
 
 from apps.api.modules.recommendations import recommend, sort_tasks, note as note_exposure, CATALOG_SIZE, EXPLORATION_CATALOG_SIZE
 from apps.api.modules.contributors import claim_name, validate_identity
@@ -578,6 +578,8 @@ def bundle(id:str):
         for artifact in artifacts:
             if artifact.get('target'):
                 for target in definition_closure(tx,artifact['target']):target_sources[target['target_hash']]=target
+    toolchain = artifacts[-1]['toolchain']
+    revision, _ = bundle_mathlib(toolchain)
     buf=io.BytesIO()
     with zipfile.ZipFile(buf,'w',zipfile.ZIP_DEFLATED) as z:
         written_targets=set()
@@ -592,9 +594,9 @@ def bundle(id:str):
                     z.writestr(target['target_module'].replace('.','/')+'.lean',target_source(target))
                     written_targets.add(target['target_hash'])
             z.writestr(a['file_path'],imports+'\n'+a['source'])
-        z.writestr('lean-toolchain','leanprover/lean4:v4.19.0\n')
-        z.writestr('lakefile.toml','name = "research"\nversion = "0.1.0"\n[[require]]\nname = "mathlib"\ngit = "https://github.com/leanprover-community/mathlib4"\nrev = "'+MATHLIB_REVISION+'"\n[[lean_lib]]\nname = "MC"\n[[lean_lib]]\nname = "MCTargets"\n')
-        z.writestr('lake-manifest.json',json.dumps(bundle_manifest(),indent=2))
+        z.writestr('lean-toolchain',toolchain+'\n')
+        z.writestr('lakefile.toml','name = "research"\nversion = "0.1.0"\n[[require]]\nname = "mathlib"\ngit = "https://github.com/leanprover-community/mathlib4"\nrev = "'+revision+'"\n[[lean_lib]]\nname = "MC"\n[[lean_lib]]\nname = "MCTargets"\n')
+        z.writestr('lake-manifest.json',json.dumps(bundle_manifest(toolchain),indent=2))
         z.writestr('manifest.json',json.dumps([dict(id=a['id'],content_hash=a['content_hash'],dependencies=a['dependencies'],theorem=a['theorem'],toolchain=a['toolchain'],policy=a['policy'],library_id=a.get('library_id'),target_hash=(a.get('target') or {}).get('target_hash')) for a in artifacts],indent=2))
         z.writestr('README.md','This archive contains proof source and dependency sources for inspection. Do not install Lean, elan, Lake or Mathlib on the user computer for this task. Submit only new source, the entry theorem and dependency IDs through the API; the server assembles dependencies and performs compilation and verification. Artifact IDs name the modules. Import them and reference their declared theorem names.\n')
     return Response(buf.getvalue(),media_type='application/zip',headers={'Content-Disposition':f'attachment; filename="{id}.zip"'})
