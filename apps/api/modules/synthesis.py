@@ -21,7 +21,20 @@ def catalog(tx,pid,prefix=''):
 def get_guide(tx,pid):
     need(tx,'problems',pid)
     current=tx.get('research_guides',pid)
-    if current:return current
+    if current:
+        # Preserve historical statements and references; unresolved conditions are
+        # gaps until a roadmap editor explicitly separates premises and results.
+        changed=False
+        for graph in current['header']['graphs']:
+            for node in graph['nodes']:
+                if node['status']!='conditional':continue
+                node['status']='missing';changed=True
+                if not any(m['node_id']==node['id'] for m in graph['missing']):
+                    graph['missing'].append(dict(node_id=node['id'],description='Historical conditional step: identify and separate its unresolved premises.',next_step='Read the cited Insights, retain their exact hypotheses, and split available implications from missing premises.'))
+        if changed:
+            current['content_hash']=digest(dict(header=current['header'],body_markdown=current['body_markdown']))
+            tx.put('research_guides',current)
+        return current
     header=dict(format='humanity-proof-graphs-v1',problem_id=pid,graphs=[])
     body='No proof roadmap has been submitted yet.'
     current=dict(id=pid,problem_id=pid,header=header,body_markdown=body,content_hash=digest(dict(header=header,body_markdown=body)),updated_at=None,updated_by=None)
