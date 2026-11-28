@@ -1,11 +1,14 @@
 """One public proof-graph guide per problem, edited under exclusive task leases."""
-import copy,secrets,time
+import copy,secrets,time,math
+from pathlib import Path
 from fastapi import HTTPException
 from apps.api.infrastructure.store import digest
 from apps.api.modules.core import need,clean,finish_task,contribute
 from apps.api.modules.scoring import Scores
 from apps.api.modules.guide_format import render_document,MAX_DOCUMENT_CHARS
 
+
+MIN_RESEARCH_SECONDS=300
 
 def active_plans(tx,pid,scores=None):
     """Count accepted edits for scheduling, not the number of shared files."""
@@ -98,6 +101,11 @@ def submit_plan(tx,body):
     if t['type']!='research_synthesis' or t['status']!='claimed' or t.get('expires_at',0)<=time.time():raise HTTPException(409,'Claim an active research_synthesis task before editing the shared guide')
     if t.get('contributor_id')!=body['contributor_id'] or not secrets.compare_digest(t.get('claim_hash',''),digest(body['claim_token'])):raise HTTPException(403,'Invalid research-guide task lease')
     if t['problem_id']!=pid:raise HTTPException(422,'The task belongs to a different problem')
+    started=t.get('claimed_at',t.get('expires_at',0)-t.get('lease_seconds',3600))
+    remaining=math.ceil(MIN_RESEARCH_SECONDS-(time.time()-started))
+    if remaining>0:
+        prompt=(Path(__file__).resolve().parents[3]/'prompts/research_synthesis_early_submission.md').read_text()
+        raise HTTPException(429,dict(code='roadmap_research_time_remaining',minimum_research_seconds=MIN_RESEARCH_SECONDS,retry_after_seconds=remaining,message='Spend at least five minutes carefully researching and refining this shared roadmap under the current lease.',research_prompt=prompt,task_id=t['id']),headers={'Retry-After':str(remaining)})
     current=get_guide(tx,pid)
     if body['base_hash']!=t.get('synthesis_base_hash') or body['base_hash']!=current['content_hash']:raise HTTPException(409,'The shared guide changed after this task was claimed. Reload it and claim a fresh editing lease.')
     header=validate_graphs(tx,pid,copy.deepcopy(body['header']))

@@ -203,3 +203,52 @@ assert(!host.hidden);assert(host.innerHTML.includes('best'));assert(host.innerHT
 renderRoadmapProgress({current:{header:{graphs:[]}}});assert(host.hidden);
 """
     subprocess.run(['node','-e',script],check=True,capture_output=True,text=True)
+
+
+def test_roadmap_requires_five_minutes_and_early_attempt_is_atomic(client,monkeypatch):
+    from apps.api.modules import synthesis
+    monkeypatch.setattr(synthesis,'MIN_RESEARCH_SECONDS',300)
+    clock=[time.time()];monkeypatch.setattr(synthesis.time,'time',lambda:clock[0])
+    task=claim(client);data=body(task)
+    original=client.get('/api/v1/problems/P1/research-guidance').json()
+    rejected=client.post('/api/v1/problems/P1/research-guidance',json=data,headers={'Idempotency-Key':'early-guide'})
+    assert rejected.status_code==429,rejected.text
+    detail=rejected.json()['detail']
+    assert detail['minimum_research_seconds']==300 and detail['retry_after_seconds']==300
+    assert rejected.headers['Retry-After']=='300'
+    assert 'every deduction' in detail['research_prompt'] and 'claim_token' in detail['research_prompt']
+    assert client.get('/api/v1/problems/P1/research-guidance').json()==original
+    with main.store.transaction() as tx:
+        assert tx.all('research_updates')==[] and tx.all('contributions')==[]
+        assert tx.get('tasks',task['task']['id'])['status']=='claimed'
+        assert tx.all('idempotency')==[]
+    clock[0]+=299.99
+    r=client.post('/api/v1/problems/P1/research-guidance',json=data)
+    assert r.status_code==429 and r.headers['Retry-After']=='1'
+    clock[0]+=0.01
+    r=client.post('/api/v1/problems/P1/research-guidance',json=data,headers={'Idempotency-Key':'early-guide'})
+    assert r.status_code==200,r.text
+    assert client.get('/api/v1/contributors/1/score').json()['score']==15
+
+
+def test_roadmap_timer_renewal_reclaim_auth_and_expiry(client,monkeypatch):
+    from apps.api.modules import synthesis
+    monkeypatch.setattr(synthesis,'MIN_RESEARCH_SECONDS',300)
+    clock=[time.time()];monkeypatch.setattr(synthesis.time,'time',lambda:clock[0])
+    first=claim(client);data=body(first)
+    assert client.post('/api/v1/problems/P1/research-guidance',json=dict(data,claim_token='wrong')).status_code==403
+    clock[0]+=60
+    assert client.post('/api/v1/tasks/'+first['task']['id']+'/renew',json=dict(claim_token=first['claim_token'])).status_code==200
+    clock[0]+=240
+    # Renewal did not reset the eligibility clock.
+    assert client.post('/api/v1/problems/P1/research-guidance',json=data).status_code==200
+    with main.store.transaction() as tx:
+        for n in range(20):tx.put('insights',dict(tx.get('insights','Iknown'),id='Ilater'+str(n),created_at=clock[0]))
+    second=claim(client,'2','Bob')
+    clock[0]+=301
+    assert client.post('/api/v1/tasks/'+second['task']['id']+'/release',json=dict(claim_token=second['claim_token'])).status_code==200
+    third=claim(client,'2','Bob')
+    r=client.post('/api/v1/problems/P1/research-guidance',json=body(third,'2','Bob',body_markdown='Refined after reclaim.'))
+    assert r.status_code==429 and r.json()['detail']['retry_after_seconds']==300
+    clock[0]+=3601
+    assert client.post('/api/v1/problems/P1/research-guidance',json=body(third,'2','Bob')).status_code==409
