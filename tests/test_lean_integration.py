@@ -376,3 +376,16 @@ def test_same_lease_real_lean_error_feedback_and_successful_retry(tmp_path,monke
     feedback=c.get(r.json()['task_feedback_url']).json();assert feedback['status']=='submitted' and not feedback['can_retry']
     assert feedback['attempts'][-1]['status']=='passed' and len(feedback['attempts'])==2
     assert c.get('/api/v1/contributors/2/score').json()['score']==8
+
+
+@pytest.mark.skipif(os.environ.get('RUN_LEAN_TESTS')!='1',reason='Requires pinned sandbox')
+def test_sandbox_output_limit_allows_large_modules_and_remains_bounded(tmp_path):
+    tmp_path.chmod(0o777)
+    code,log,_=worker.sandbox(tmp_path,['sh','-c','head -c 262144 /dev/zero > output.bin'],True)
+    assert code==0,log
+    assert (tmp_path/'output.bin').stat().st_size==262144
+    code,log,_=worker.sandbox(tmp_path,['sh','-c',f'head -c {worker.MAX_OUTPUT_FILE_BYTES+1} /dev/zero > output.bin'],True)
+    assert code!=0
+    assert (tmp_path/'output.bin').stat().st_size<=worker.MAX_OUTPUT_FILE_BYTES
+    code,log,_=worker.sandbox(tmp_path,['sh','-c',f'head -c {worker.MAX_DIAGNOSTIC_CHARS+1} /dev/zero'],True)
+    assert code==1 and log=='Excessive diagnostic output'
