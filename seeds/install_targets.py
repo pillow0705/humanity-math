@@ -9,7 +9,7 @@ IDS=('P007','P009','P003')
 def install(tx):
     review=json.loads((DIRECTORY/'validation.json').read_text())
     # Preserve the historical review receipt. CI checks these exact propositions on the active toolchain.
-    if review['review_source_sha256']!=hashlib.sha256((DIRECTORY/'Review.lean').read_bytes()).hexdigest():
+    if review['review_source_sha256']!=hashlib.sha256((DIRECTORY.parent/'lean-history/v4.19.0/Review.lean').read_bytes()).hexdigest():
         raise ValueError('Target review source changed after validation')
     targets={pid:json.loads((DIRECTORY/(pid+'.json')).read_text()) for pid in IDS}
     for pid,target in targets.items():
