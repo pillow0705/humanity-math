@@ -4,11 +4,11 @@ from apps.api.modules.lifecycle import withdrawn
 from apps.api.modules.scoring import Scores
 
 
-def recent_activity(tx, limit=8):
+def recent_activity(tx, limit=8,scores=None):
     problems={p['id']:p for p in tx.all('problems') if p.get('status')!='archived'}
     insights={i['id']:i for i in tx.all('insights') if i['problem_id'] in problems and not withdrawn(tx,'insights',i['id'])}
     items=[]
-    scores=Scores(tx)
+    scores=scores or Scores(tx)
     milestones={m['id']:m for m in tx.all('activity_milestones')}
     for i in insights.values():
         items.append(dict(event='insight_submitted',object_id=i['id'],kind='insights',problem_id=i['problem_id'],title=i['title'],author_name=i.get('contributor_name',''),timestamp=i['created_at']))

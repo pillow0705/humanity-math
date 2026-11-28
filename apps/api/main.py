@@ -12,6 +12,7 @@ from apps.api.modules.recommendations import recommend, sort_tasks, note as note
 from apps.api.modules.contributors import claim_name, validate_identity
 from apps.api.modules.credentials import issue as issue_credential, verify as verify_credential, public_person
 from apps.api.modules.scoring import Scores, policy as scoring_policy
+from apps.api.modules.public_views import read as read_public_view
 from apps.api.modules.completion import sync_candidates
 from apps.api.modules.research import assign_direction, direction_instruction, final_target, research_policy, describe_problem, validate_completion_claim
 from apps.api.modules.exploration import ensure_exploration
@@ -207,18 +208,20 @@ def contributor(id:str):
 def contribution_policy(): return scoring_policy()
 
 @app.get('/api/v1/leaderboard')
-def leaderboard(problem_id:str|None=None,limit:int=Query(10,ge=1,le=100),offset:int=Query(0,ge=0)):
-    with store.transaction() as tx:
-        people=ranked(tx,problem_id)
+def leaderboard(response:Response,problem_id:str|None=None,limit:int=Query(10,ge=1,le=100),offset:int=Query(0,ge=0)):
+    def build(tx,scores):
+        people=ranked(tx,problem_id,scores)
         return dict(items=[public_person(p) for p in people[offset:offset+limit]],total=len(people),offset=offset,limit=limit,algorithm=scoring_policy()['version'])
+    return read_public_view(store,('leaderboard',problem_id,limit,offset),build,response)
 
 @app.get('/api/v1/contributors/{id}/rank')
-def contributor_rank(id:str,problem_id:str|None=None):
-    with store.transaction() as tx:
-        need(tx,'contributors',id);people=ranked(tx,problem_id)
+def contributor_rank(id:str,response:Response,problem_id:str|None=None):
+    def build(tx,scores):
+        need(tx,'contributors',id);people=ranked(tx,problem_id,scores)
         entry=next((p for p in people if p['id']==id),None)
         return dict(contributor_id=id,problem_id=problem_id,rank=entry['rank'] if entry else None,total_ranked=len(people),
-                    score=Scores(tx).total(id,problem_id)['score'],tie_break='Equal scores are ordered by contributor number')
+                    score=scores.total(id,problem_id)['score'],tie_break='Equal scores are ordered by contributor number')
+    return read_public_view(store,('contributor-rank',id,problem_id),build,response)
 
 @app.get('/api/v1/contributors/{id}/submissions')
 def contributor_submissions(id:str,kind:str|None=None,problem_id:str|None=None,status:str|None=None,q:str='',offset:int=Query(0,ge=0),limit:int=Query(30,ge=1,le=100)):
@@ -255,16 +258,16 @@ def insight_graph(id:str):
         return dict(items=nodes,total=len(nodes))
 
 @app.get('/api/v1/problems/{id}/overview')
-def overview(id:str):
-    with store.transaction() as tx:
+def overview(id:str,response:Response):
+    def build(tx,scores):
         p=need(tx,'problems',id)
-        dispatch=sync_schedule(tx,id).get(id)
-        scores=Scores(tx)
-        insights=[x for x in tx.all('insights') if x['problem_id']==id and x['id'] not in scores.withdrawn|scores.superseded]
-        from apps.api.modules.lean import canonical_proof_ids
-        verified=canonical_proof_ids(tx)
+        insights=[x for x in scores.objects['insights'].values() if x['problem_id']==id and x['id'] not in scores.withdrawn|scores.superseded]
+        artifacts=scores.objects['lean_artifacts'].values()
+        hidden_proofs=scores.withdrawn|{a['supersedes_id'] for a in artifacts if a.get('supersedes_id')}
+        verified={a['insight_id'] for a in artifacts if a['id'] in scores.bound_proofs and a['id'] not in hidden_proofs}
         available=sum(supported_task(t) and t['problem_id']==id and (t['status']=='available' or (t['status']=='claimed' and t.get('expires_at',0)<=time.time())) for t in tx.all('tasks'))
-        return dict(problem=describe_problem(p),stats=dict(insights=len(insights),reviews=dispatch.get('reviews',sum(scores.evaluation(i,'insights')['effective_reviews'] for i in insights)) if dispatch else sum(scores.evaluation(i,'insights')['effective_reviews'] for i in insights),verified_lean=dispatch.get('verified_insights',len(scores.verified_insights)) if dispatch else sum(i['id'] in verified for i in insights),available_tasks=available))
+        return dict(problem=describe_problem(p),stats=dict(insights=len(insights),reviews=sum(scores.evaluation(i,'insights')['effective_reviews'] for i in insights),verified_lean=sum(i['id'] in verified for i in insights),available_tasks=available))
+    return read_public_view(store,('overview',id),build,response)
 
 @app.get('/health')
 def health(): return dict(status='ok',storage='files',release=os.environ.get('APP_RELEASE','development'))
@@ -283,10 +286,10 @@ def prompt(type:str):
     return prefix_agent_paths((BASE/'prompts'/f'{type}.md').read_text())
 
 @app.get('/api/v1/activity')
-def activity(limit:int=Query(8,ge=1,le=50)):
+def activity(response:Response,limit:int=Query(8,ge=1,le=50)):
     from apps.api.modules.activity import recent_activity
-    with store.transaction() as tx:
-        return recent_activity(tx,limit)
+    return read_public_view(store,('activity',limit),lambda tx,scores:recent_activity(tx,limit,scores),response)
+
 
 @app.get('/api/v1/problems')
 def problems(include_archived:bool=False):
@@ -441,16 +444,16 @@ def list_content(kind,problem_id,q,offset,limit,include_withdrawn=False):
 def insights(problem_id:str|None=None,q:str='',offset:int=Query(0,ge=0),limit:int=Query(30,ge=1,le=100),include_withdrawn:bool=False): return list_content('insights',problem_id,q,offset,limit,include_withdrawn)
 
 @app.get('/api/v1/insights/ranking')
-def insight_ranking(problem_id:str|None=None,q:str='',offset:int=Query(0,ge=0),limit:int=Query(10,ge=1,le=100)):
-    """Rank active insights by their current individual contribution points."""
-    with store.transaction() as tx:
-        if problem_id: need(tx,'problems',problem_id)
+def insight_ranking(response:Response,problem_id:str|None=None,q:str='',offset:int=Query(0,ge=0),limit:int=Query(10,ge=1,le=100)):
+    """Rank active insights by current individual contribution points."""
+    def build(tx,scores):
+        if problem_id:need(tx,'problems',problem_id)
         active={p['id'] for p in tx.all('problems') if p['status']!='archived'}
-        scores=Scores(tx)
         items=[x for x in scores.objects['insights'].values() if (x['problem_id']==problem_id if problem_id else x['problem_id'] in active) and x['id'] not in scores.withdrawn and x['id'] not in scores.superseded]
         items.sort(key=lambda x:(-scores.evaluation(x,'insights')['contribution_points'],x['created_at'],x['id']))
         ranked_items=[dict(id=x['id'],problem_id=x['problem_id'],title=x['title'],contributor_name=x.get('contributor_name',''),seed=x.get('seed',False),rank=rank,evaluation=scores.evaluation(x,'insights')) for rank,x in enumerate(items,1) if not q or q.lower() in json.dumps(x,ensure_ascii=False).lower()]
         return page(ranked_items,offset,limit)
+    return read_public_view(store,('insight-ranking',problem_id,q,offset,limit),build,response)
 
 def content(kind,id):
     with store.transaction() as tx:
@@ -698,9 +701,9 @@ def research_update(id:str):
 
 
 @app.get('/api/v1/platform-status')
-def platform_status():
+def platform_status(response:Response):
     from apps.api.modules.migration import progress
-    with store.transaction() as tx:return progress(tx)
+    return read_public_view(store,('platform-status',),lambda tx,scores:progress(tx,scores),response)
 
 @app.post('/api/v1/lean-targets/batch')
 def post_target_batch(body:LeanTargetBatch,request:Request):

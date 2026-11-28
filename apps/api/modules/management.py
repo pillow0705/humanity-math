@@ -44,9 +44,9 @@ def submissions(tx,person,kind,problem_id,status,q,offset,limit,prefix=''):
     items.sort(key=lambda x:(x['created_at'],x['id']),reverse=True)
     return dict(total=len(items),offset=offset,limit=limit,items=items[offset:offset+limit])
 
-def ranked(tx,problem_id=None):
+def ranked(tx,problem_id=None,scores=None):
     if problem_id: need(tx,'problems',problem_id)
-    scores=Scores(tx)
+    scores=scores or Scores(tx)
     people=[dict(p,contribution=scores.total(p['id'],problem_id)) for p in scores.people.values()]
     people=[p for p in people if p['contribution']['submissions'] or p['contribution'].get('demo_points')]
     people.sort(key=lambda p:(-p['contribution']['score'],p['number']))

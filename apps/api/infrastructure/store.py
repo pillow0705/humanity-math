@@ -51,6 +51,13 @@ class Store:
         while len(self._records) > self._cache_limit: self._records.popitem(last=False)
         return value
 
+    def public_revision(self):
+        try:
+            stat=(self.root/'.revision').stat()
+            revision=(stat.st_ino,stat.st_mtime_ns,stat.st_ctime_ns,stat.st_size)
+        except FileNotFoundError:revision=None
+        return revision,(self.root/'.pending.json').exists()
+
     @contextmanager
     def transaction(self):
         with _LOCAL, open(self.root / '.lock', 'a+') as lock:
@@ -64,10 +71,14 @@ class Store:
                 if tx.writes:
                     payload = list(tx.writes.values())
                     atomic(journal, payload); self.apply(payload); journal.unlink()
+                # Capture under the file lock; a later writer must not stamp an
+                # older read snapshot with its newer revision.
+                tx.committed_revision=self.public_revision()
             finally:
                 fcntl.flock(lock, fcntl.LOCK_UN)
     def apply(self, writes):
         for kind, ident, value in writes: atomic(self.path(kind, ident), value)
+        if writes:atomic(self.root/'.revision',uuid.uuid4().hex)
 
 class Transaction:
     def __init__(self, store): self.store = store; self.writes = {}; self._reads = {}; self._collections = {}
