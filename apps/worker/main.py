@@ -16,6 +16,9 @@ STORE=Store()
 TOOLS=Path(os.environ.get('LEAN_HOME',ROOT / 'tools' / f'lean-{LEAN_VERSION}-linux'))
 IMAGE=os.environ.get('LEAN_IMAGE',f'math-collab-lean:{LEAN_VERSION}')
 CACHE=STORE.root/'artifacts/cache'
+# Docker RLIMIT_FSIZE is measured in bytes, not shell blocks.
+MAX_OUTPUT_FILE_BYTES=128*1024*1024
+MAX_DIAGNOSTIC_CHARS=200000
 MATHLIB=Path(os.environ.get('MATHLIB_HOME',ROOT / 'tools' / f'mathlib-{MATHLIB_VERSION}'))
 
 @lru_cache(maxsize=1)
@@ -39,7 +42,7 @@ def sandbox(work,command,writable=False):
     # Pin the concrete image ID; tags alone are not verification identities.
     image=docker(['image','inspect','--format','{{.Id}}',IMAGE])
     if image.returncode: raise RuntimeError('Lean sandbox image is unavailable: '+image.stderr[-1000:])
-    args=['docker','run','--rm','--name',name,'--network=none','--read-only','--cap-drop=ALL','--security-opt=no-new-privileges','--pids-limit=128',f'--memory={MEMORY_MB}m',f'--memory-swap={MEMORY_MB+1024}m','--cpus=2','--user=1000:1000','--ulimit','fsize=131072:131072','--tmpfs','/tmp:rw,noexec,nosuid,size=64m','-v',str(TOOLS)+':/opt/lean:ro','-v',str(MATHLIB)+':/opt/mathlib:ro','-v',str(work)+':/work'+('' if writable else ':ro'),'-w','/work','-e','LEAN_PATH='+library_paths(),'-e','HOME=/tmp',image.stdout.strip(),*command]
+    args=['docker','run','--rm','--name',name,'--network=none','--read-only','--cap-drop=ALL','--security-opt=no-new-privileges','--pids-limit=128',f'--memory={MEMORY_MB}m',f'--memory-swap={MEMORY_MB+1024}m','--cpus=2','--user=1000:1000','--ulimit',f'fsize={MAX_OUTPUT_FILE_BYTES}:{MAX_OUTPUT_FILE_BYTES}','--tmpfs','/tmp:rw,noexec,nosuid,size=64m','-v',str(TOOLS)+':/opt/lean:ro','-v',str(MATHLIB)+':/opt/mathlib:ro','-v',str(work)+':/work'+('' if writable else ':ro'),'-w','/work','-e','LEAN_PATH='+library_paths(),'-e','HOME=/tmp',image.stdout.strip(),*command]
     logpath=work/'run.log'
     try:
         # File output avoids unbounded RAM from a malicious diagnostic stream.
@@ -48,8 +51,9 @@ def sandbox(work,command,writable=False):
             try: code=proc.wait(timeout=TIMEOUT)
             except subprocess.TimeoutExpired:
                 docker(['kill',name]); proc.kill(); proc.wait(); return 124,'Verification timeout',image.stdout.strip()
-        text=logpath.read_text(errors='replace')
-        if len(text)>200000: return 1,'Excessive diagnostic output',image.stdout.strip()
+        with logpath.open(errors='replace') as log:
+            text=log.read(MAX_DIAGNOSTIC_CHARS+1)
+        if len(text)>MAX_DIAGNOSTIC_CHARS: return 1,'Excessive diagnostic output',image.stdout.strip()
         return code,text,image.stdout.strip()
     finally: docker(['rm','-f',name])
 
@@ -105,6 +109,13 @@ def parse_axioms(text):
     if set(axioms)-ALLOWED_AXIOMS: raise RuntimeError('Disallowed transitive axioms: '+str(axioms))
     return axioms
 
+def target_failure_status(code, log):
+    if code in (124,125,126,127,137,139,153):
+        return 'error'
+    if re.search(r"(?m)^failed to write [^\n]*\.olean[^\n]*:",log):
+        return 'error'
+    return 'invalid'
+
 def verify_target(target,arts):
     work=Path(tempfile.mkdtemp(prefix='target-',dir=STORE.root/'artifacts'));os.chmod(work,0o777)
     try:
@@ -114,13 +125,13 @@ def verify_target(target,arts):
         for dependency in target.get('insight_dependency_snapshot',[]):prepare_target(work,dependency)
         source=target_source(target);path.write_text(source)
         code,log,image=sandbox(work,['/opt/lean/bin/lean','-j','1','-o',relative.replace('.lean','.olean'),relative],True)
-        if code: return dict(status='error' if code in (124,125,126,127,137,139) else 'invalid',log=log,exit_code=code)
+        if code: return dict(status=target_failure_status(code,log),log=log,exit_code=code)
         checker=('import Lean\nimport '+target['target_module']+'\n'
                  +'run_cmd do\n  let info ← Lean.getConstInfo `'+target['target_constant']+'\n  unless info.levelParams.isEmpty do throwError \"Fixed Insight target must be closed over universe levels\"\n'
                  +'def MCVerifiedResult : Prop := @_root_.'+target['target_constant']+'\n#print axioms MCVerifiedResult\n')
         (work/'Check.lean').write_text(checker)
         code,checklog,_=sandbox(work,['/opt/lean/bin/lean','-j','1','Check.lean'])
-        if code: return dict(status='error' if code in (124,125,126,127,137,139) else 'invalid',log=log+'\n'+checklog,exit_code=code)
+        if code: return dict(status=target_failure_status(code,checklog),log=log+'\n'+checklog,exit_code=code)
         axioms=parse_axioms(checklog)
         cached=target_cache_files(target);cached.mkdir(parents=True,exist_ok=True)
         shutil.copyfile(path.with_suffix('.olean'),cached/'module.olean')

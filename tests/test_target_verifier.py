@@ -150,7 +150,7 @@ def test_final_verification_prepares_supporting_closures_even_when_leaf_does_not
     assert seen==['Ldep','Lsupport','Ltest']
 
 
-@pytest.mark.parametrize('code',[124,125,126,127,137,139])
+@pytest.mark.parametrize('code',[124,125,126,127,137,139,153])
 def test_target_infrastructure_exit_is_retryable(verifier,monkeypatch,code):
     monkeypatch.setattr(worker,'sandbox',lambda *args:(code,'Compiler infrastructure failed','image-test'))
     assert worker.verify_target(target(),[])['status']=='error'
@@ -192,3 +192,12 @@ def test_target_cache_reuses_transitive_definition_modules_without_nested_snapsh
     worker.prepare_target(work,third)
     assert all((work/(x['target_module'].replace('.','/')+'.olean')).exists() for x in [first,second,third])
     assert all('insight_dependency_snapshot' not in snapshot for snapshot in third['insight_dependency_snapshot'])
+
+
+def test_target_output_write_failure_is_not_a_mathematical_rejection(verifier,monkeypatch):
+    log="failed to write 'MCTargets/Itest.olean': failed to create file\n"
+    monkeypatch.setattr(worker,'sandbox',lambda *args:(1,log,'image-test'))
+    result=worker.verify_target(target(),[])
+    assert result['status']=='error' and result['exit_code']==1
+    monkeypatch.setattr(worker,'sandbox',lambda *args:(1,'Unknown identifier missingLemma','image-test'))
+    assert worker.verify_target(target(),[])['status']=='invalid'
