@@ -34,7 +34,7 @@ theorem collatz_negation_spec :
     (¬ CollatzTarget) ↔
       ∃ n : Nat, 0 < n ∧ ∀ k : Nat, (Nat.iterate CollatzStep k) n ≠ 1 := by
   classical
-  simp only [CollatzTarget, not_forall, _root_.not_imp, not_exists, exists_prop]
+  simp only [CollatzTarget, not_forall, Classical.not_imp, not_exists, exists_prop]
 
 -- Identity bridges check representation compatibility without proving any conjecture.
 example (h : EulerTarget) : Irrational Real.eulerMascheroniConstant := h

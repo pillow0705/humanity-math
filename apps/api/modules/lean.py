@@ -1,29 +1,44 @@
-import json, re
+import json, os, re
 from pathlib import Path
 from fastapi import HTTPException
 from apps.api.infrastructure.store import digest
 from apps.api.modules.core import need, clean, check_supersedes, finish_task, contribute
 
+from apps.api.lean_config import LEAN_VERSION, TOOLCHAIN, MATHLIB_REVISION, MATHLIB_VERSION
+
 POLICY = 'lean-mathlib-v1'
-TOOLCHAIN = 'leanprover/lean4:v4.19.0'
-MATHLIB_REVISION = 'c44e0c8ee63ca166450922a373c7409c5d26b00b'
-MATHLIB_VERSION = 'v4.19.0'
-MATHLIB_MANIFEST = json.loads((Path(__file__).resolve().parents[3]/'contracts/mathlib-manifest.json').read_text())
+CONTRACTS = Path(__file__).resolve().parents[3] / 'contracts'
+MATHLIB_MANIFEST = json.loads((CONTRACTS / 'mathlib-manifest.json').read_text())
 LIBRARY_ROOTS = ('Init', 'Std', 'Mathlib', 'Batteries', 'Aesop', 'Qq')
 LIBRARY_ID = digest(dict(toolchain=TOOLCHAIN,mathlib=MATHLIB_REVISION,dependencies=MATHLIB_MANIFEST))
 TIMEOUT = 600
-MEMORY_MB = 4096
+MEMORY_MB = int(os.environ.get('LEAN_MEMORY_MB', '4096'))
+if not 1024 <= MEMORY_MB <= 16384:
+    raise ValueError('LEAN_MEMORY_MB must be between 1024 and 16384')
 ALLOWED_AXIOMS = {'propext','Classical.choice','Quot.sound'}
 
 def library_import(name):
     return bool(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_']*(\.[A-Za-z_][A-Za-z0-9_']*)*",name)) and name.split('.')[0] in LIBRARY_ROOTS
 
-def bundle_manifest():
-    packages=[dict(p,inherited=True) for p in MATHLIB_MANIFEST['packages']]
+def bundle_mathlib(toolchain):
+    if toolchain == TOOLCHAIN:
+        return MATHLIB_REVISION, MATHLIB_MANIFEST
+    if toolchain == 'leanprover/lean4:v4.19.0':
+        manifest = json.loads((CONTRACTS / 'lean-history/v4.19.0/mathlib-manifest.json').read_text())
+        return 'c44e0c8ee63ca166450922a373c7409c5d26b00b', manifest
+    raise HTTPException(409, 'No pinned library manifest is available for this historical toolchain')
+
+
+def bundle_manifest(toolchain=TOOLCHAIN):
+    revision, manifest = bundle_mathlib(toolchain)
+    packages=[dict(p,inherited=True) for p in manifest['packages']]
     packages.append(dict(url='https://github.com/leanprover-community/mathlib4',type='git',subDir=None,
-                         scope='leanprover-community',rev=MATHLIB_REVISION,name='mathlib',
-                         manifestFile='lake-manifest.json',inputRev=MATHLIB_REVISION,inherited=False,configFile='lakefile.lean'))
-    return dict(version=MATHLIB_MANIFEST['version'],packagesDir='.lake/packages',packages=packages,name='research',lakeDir='.lake')
+                         scope='leanprover-community',rev=revision,name='mathlib',
+                         manifestFile='lake-manifest.json',inputRev=revision,inherited=False,configFile='lakefile.lean'))
+    result = dict(version=manifest['version'], packagesDir='.lake/packages', packages=packages, name='research', lakeDir='.lake')
+    if 'fixedToolchain' in manifest:
+        result['fixedToolchain'] = manifest['fixedToolchain']
+    return result
 
 def canonical_proof_ids(tx):
     """One active proof per insight; historical modules remain importable by old chains."""
@@ -50,7 +65,7 @@ def create_artifact(tx, body):
     insight = need(tx,'insights',body['insight_id'])
     from apps.api.modules.targets import get_target, target_proof_matches
     target=get_target(tx,insight['id'])
-    if not target: raise HTTPException(409,'This insight needs an immutable Lean target before proof submission; its author must register the target first')
+    if not target or target.get('library_id') != LIBRARY_ID: raise HTTPException(409,'This insight needs an immutable Lean target before proof submission; its author must register the target first')
     if target['status'] in ('revoked','stale'):raise HTTPException(409,'This target is revoked or stale; wait for proposition maintenance before submitting proofs')
     if target['status']=='error': raise HTTPException(409,'Target checking failed temporarily; its author must request a check retry before proof submission')
     if target['status']=='invalid': raise HTTPException(409,'The frozen Lean target is invalid; submit a corrected replacement insight before proving it')
@@ -73,7 +88,7 @@ def create_artifact(tx, body):
         if dep['insight_id'] in canonical and canonical[dep['insight_id']]!=dep['id']:
             raise HTTPException(409,dict(message='Use the canonical proof for this insight; the requested module is a historical duplicate.',existing_id=canonical[dep['insight_id']]))
         v = need(tx,'verifications',dep['verification_id'])
-        if v.get('target_obsolete') or v['status'] != 'passed' or v['policy'] != POLICY: raise HTTPException(422,'Dependencies must pass the current verification policy')
+        if v.get('target_obsolete') or v['status'] != 'passed' or v['policy'] != POLICY or dep.get('library_id') != LIBRARY_ID: raise HTTPException(422,'Dependencies must pass in the current Lean environment')
     source = body['source']
     validate_source(source,deps)
     key = digest(dict(target_hash=target['target_hash'],source=source,theorem=body['theorem'],dependencies=[d['content_hash'] for d in deps],toolchain=TOOLCHAIN,policy=POLICY,library_id=LIBRARY_ID))
@@ -94,6 +109,8 @@ def validate_source(source, dependencies, target_dependencies=()):
         raise HTTPException(422,'Unsupported metaprogramming, unproved axiom or placeholder; submit ordinary Lean definitions and proofs')
     allowed = {'MC.'+d['id'] for d in dependencies}|{d['target_module'] for d in target_dependencies}
     for line in source.splitlines():
+        if re.match(r'^\s*(?:(?:public|private|meta)\s+import|module|prelude)\b', line):
+            raise HTTPException(422, 'Use ordinary imports. Module headers and import modifiers are not supported')
         if re.match(r'^\s*import\b',line):
             imports = line.strip().split()[1:]
             if not imports or any(x not in allowed and not library_import(x) for x in imports): raise HTTPException(422,'Use installed Init/Std/Mathlib/Batteries/Aesop/Qq modules or declared verified MC dependencies')
@@ -112,7 +129,7 @@ def closure(tx, obj):
 def environment(prefix=''):
     """Public contract for the submission environment, not the host filesystem."""
     profile = dict(
-        toolchain=TOOLCHAIN, lean_version='4.19.0', verification_policy=POLICY,
+        toolchain=TOOLCHAIN, lean_version=LEAN_VERSION, verification_policy=POLICY,
         library_id=LIBRARY_ID,
         libraries=[dict(name='Lean core', imports=['Init','Std'], available=True),
                    dict(name='Mathlib', version=MATHLIB_VERSION, revision=MATHLIB_REVISION, available=True, precompiled=True,

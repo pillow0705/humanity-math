@@ -2943,9 +2943,9 @@
           },
           "toolchain": {
             "type": "string",
-            "const": "leanprover/lean4:v4.19.0",
+            "const": "leanprover/lean4:v4.36.0",
             "title": "Toolchain",
-            "default": "leanprover/lean4:v4.19.0"
+            "default": "leanprover/lean4:v4.36.0"
           }
         },
         "additionalProperties": false,
@@ -3390,9 +3390,9 @@
           },
           "toolchain": {
             "type": "string",
-            "const": "leanprover/lean4:v4.19.0",
+            "const": "leanprover/lean4:v4.36.0",
             "title": "Toolchain",
-            "default": "leanprover/lean4:v4.19.0"
+            "default": "leanprover/lean4:v4.36.0"
           }
         },
         "additionalProperties": false,

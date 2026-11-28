@@ -32,7 +32,7 @@ find apps/web/assets -maxdepth 1 -name '*.js' -exec node --check {} \;
 
 ## Lean verification
 
-The production-compatible environment is **Lean 4.19.0** with Mathlib commit `c44e0c8ee63ca166450922a373c7409c5d26b00b` and the dependency lock in `contracts/mathlib-manifest.json`. It is deliberately pinned; changing it requires a separate library/cache migration.
+The production-compatible environment is **Lean 4.36.0** with Mathlib commit `fc4f59e577feb1a4956671bc04ac18aaaf8cd842` and the dependency lock in `contracts/mathlib-manifest.json`. It is deliberately pinned; changing it requires a separate library/cache migration.
 
 On Linux with Docker, Git, curl and zstd installed:
 

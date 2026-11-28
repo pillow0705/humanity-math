@@ -1,4 +1,5 @@
 from typing import Literal
+from apps.api.lean_config import TOOLCHAIN
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 TaskType = Literal['insight_explore','review','lean_work','research_synthesis','lean_target']
@@ -15,7 +16,7 @@ class InlineLean(Strict):
     source: str = Field(min_length=1,max_length=200000)
     theorem: str = Field(pattern=r'^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$')
     dependencies: list[str] = Field(default_factory=list,max_length=50)
-    toolchain: Literal['leanprover/lean4:v4.19.0'] = 'leanprover/lean4:v4.19.0'
+    toolchain: Literal[TOOLCHAIN] = TOOLCHAIN
 
 class LeanTarget(Strict):
     definitions: str = Field(default='',max_length=50000,description='Ordinary Lean definitions/imports needed to state the fixed proposition; no proof placeholders or new axioms')
@@ -85,7 +86,7 @@ class Artifact(Submission):
     source: str = Field(min_length=1, max_length=200000)
     theorem: str = Field(pattern=r'^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$')
     dependencies: list[str] = Field(default_factory=list, max_length=50)
-    toolchain: Literal['leanprover/lean4:v4.19.0'] = 'leanprover/lean4:v4.19.0'
+    toolchain: Literal[TOOLCHAIN] = TOOLCHAIN
 class Audit(Submission):
     verdict: Literal['pass','concern','fail']
     rationale: str = Field(min_length=1, max_length=30000)

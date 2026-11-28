@@ -35,7 +35,7 @@ def register_target(tx, insight, body, replace_invalid=False, allow_pending_targ
         if ident==insight['id']:raise HTTPException(422,'A target cannot import itself')
         if ident not in insight.get('references',[]):raise HTTPException(422,'Target-definition dependencies must also appear in the Insight references')
         dependency=get_target(tx,ident)
-        if not dependency or not (dependency['status']=='valid' or (dependency['status']=='queued' and ident in allow_pending_target_ids)):raise HTTPException(409,'Import only valid registered target definitions; follow the reference URLs and formalize prerequisite targets first')
+        if not dependency or dependency.get('library_id') != LIBRARY_ID or not (dependency['status']=='valid' or (dependency['status']=='queued' and ident in allow_pending_target_ids)):raise HTTPException(409,'Import only valid registered target definitions; follow the reference URLs and formalize prerequisite targets first')
         target_deps.append(dict(insight_id=ident,target_hash=dependency['target_hash'],target_module=dependency['target_module'],target_constant=dependency['target_constant']))
     definitions, expression = body.get('definitions', ''), body['expression']
     validate_source(definitions, artifacts, target_deps)
@@ -50,7 +50,8 @@ def register_target(tx, insight, body, replace_invalid=False, allow_pending_targ
                   created_at=time.time())
     if previous:
         if previous['target_hash']==target['target_hash']:raise HTTPException(409,'A replacement must correct the previous target, not re-register identical content')
-        tx.put('target_versions',dict(previous,id=previous['target_hash']))
+        if not tx.get('target_versions', previous['target_hash']):
+            tx.put('target_versions',dict(previous,id=previous['target_hash']))
     target['registered_by']=insight['contributor_id']
     tx.put('insight_targets', target)
     return target
@@ -98,7 +99,8 @@ def definition_closure(tx,target):
         visiting.add(item['target_hash'])
         for snapshot in item.get('insight_dependency_snapshot',[]):
             dependency=need(tx,'insight_targets',snapshot['insight_id'])
-            if dependency['target_hash']!=snapshot['target_hash']:raise HTTPException(409,'Frozen target-definition dependency changed')
+            if dependency['target_hash'] != snapshot['target_hash']:
+                dependency = need(tx, 'target_versions', snapshot['target_hash'])
             visit(dependency)
         visiting.remove(item['target_hash']);result[item['target_hash']]=item
     visit(target);return list(result.values())

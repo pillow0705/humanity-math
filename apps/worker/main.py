@@ -2,6 +2,7 @@
 import fcntl, hashlib, json, os, re, shutil, subprocess, tempfile, time, traceback, uuid
 from pathlib import Path
 from functools import lru_cache
+from apps.api.lean_config import LEAN_VERSION, MATHLIB_VERSION
 from apps.api.infrastructure.store import Store, atomic, digest
 from apps.api.modules.lean import ALLOWED_AXIOMS, POLICY, closure, MATHLIB_MANIFEST, MATHLIB_REVISION, LIBRARY_ID, TIMEOUT, MEMORY_MB, TOOLCHAIN
 from apps.api.modules.core import need, task
@@ -12,13 +13,16 @@ from apps.api.modules.targets import target_source, target_proof_matches
 
 ROOT=Path(__file__).resolve().parents[2]
 STORE=Store()
-TOOLS=Path(os.environ.get('LEAN_HOME',ROOT/'tools/lean-4.19.0-linux'))
-IMAGE=os.environ.get('LEAN_IMAGE','math-collab-lean:4.19.0')
+TOOLS=Path(os.environ.get('LEAN_HOME',ROOT / 'tools' / f'lean-{LEAN_VERSION}-linux'))
+IMAGE=os.environ.get('LEAN_IMAGE',f'math-collab-lean:{LEAN_VERSION}')
 CACHE=STORE.root/'artifacts/cache'
-MATHLIB=Path(os.environ.get('MATHLIB_HOME',ROOT/'tools/mathlib-v4.19.0'))
+MATHLIB=Path(os.environ.get('MATHLIB_HOME',ROOT / 'tools' / f'mathlib-{MATHLIB_VERSION}'))
 
 @lru_cache(maxsize=1)
 def library_paths():
+    version = subprocess.check_output([str(TOOLS / 'bin/lean'), '--version'], text=True)
+    if not version.startswith(f'Lean (version {LEAN_VERSION},'):
+        raise RuntimeError('Mounted Lean executable does not match the pinned toolchain')
     if (MATHLIB/'lean-toolchain').read_text().strip()!=TOOLCHAIN: raise RuntimeError('Mathlib toolchain mismatch')
     if json.loads((MATHLIB/'lake-manifest.json').read_text())!=MATHLIB_MANIFEST: raise RuntimeError('Mathlib dependency lock mismatch')
     receipt=json.loads((MATHLIB/'platform-install.json').read_text())
