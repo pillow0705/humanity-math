@@ -13,19 +13,19 @@ def active(tx):
     return (tx.get('platform_states',STATE_ID) or {}).get('phase')=='target_backfill'
 
 
-def required(tx):
+def required(tx,scores=None):
     state=tx.get('platform_states',STATE_ID) or {}
     from apps.api.modules.scoring import Scores
-    scores=Scores(tx)
+    scores=scores or Scores(tx)
     ids=state.get('required_insight_ids',[]) if active(tx) else list(scores.objects['insights'])
     open_problems={p['id'] for p in tx.all('problems') if p['status']=='open'}
     return [i for i in ids if i in scores.objects['insights'] and i not in scores.withdrawn|scores.superseded and scores.objects['insights'][i]['problem_id'] in open_problems]
 
 
-def progress(tx):
+def progress(tx,scores=None):
     state=tx.get('platform_states',STATE_ID)
     if not state:return dict(phase='normal',batch_size=BATCH_SIZE,batch_points=REWARD,total=0,valid=0,remaining=0)
-    ids=required(tx);targets={t['insight_id']:t for t in tx.all('insight_targets')}
+    ids=required(tx,scores);targets={t['insight_id']:t for t in tx.all('insight_targets')}
     counts={status:sum(targets.get(i,{}).get('status')==status for i in ids) for status in ('valid','queued','checking','invalid','error','revoked','stale')}
     if state['phase']=='target_backfill' and counts['valid']==len(ids):
         state.update(phase='normal',completed_at=time.time());tx.put('platform_states',state)

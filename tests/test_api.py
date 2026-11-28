@@ -769,7 +769,7 @@ def test_exhausted_withdrawn_targets_replenish_but_closed_problems_do_not(client
     owner=dict(contributor_id='1',contributor_name='Alice')
     client.post('/api/v1/contributors/1/submissions/insights/'+i['id']+'/withdraw',json=owner)
     overview=client.get('/api/v1/problems/P001/overview').json()
-    assert overview['stats']['available_tasks']>=1
+    assert overview['stats']['available_tasks']==0  # Read-only overview does not replenish tasks.
     available=client.get('/api/v1/tasks?type=insight_explore&status=available').json()['items']
     assert len(available)==1 and available[0]['target_id'] is None
     for status in ['formal_proof_verified','archived']:
@@ -1083,6 +1083,8 @@ def test_passed_insight_rejects_more_code_and_closes_lean_leases(client):
     assert response.status_code==409
     assert response.json()['detail']['existing_id']==a['id']
     client.get('/api/v1/problems/P001/overview')
+    with main.store.transaction() as tx:assert tx.get('tasks',t['id'])['status']=='claimed'
+    client.get('/api/v1/tasks?type=lean_work')  # Explicit task discovery reconciles live work.
     with main.store.transaction() as tx:
         closed=tx.get('tasks',t['id']);assert closed['status']=='closed' and closed['claim_hash']==''
     # Auditing a passed artifact remains possible.
