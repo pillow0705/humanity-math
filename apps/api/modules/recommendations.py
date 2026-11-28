@@ -17,7 +17,7 @@ def policy(sample_size=CATALOG_SIZE):
                 impact_bonus='0.5 * impact_points / (impact_points + 10)',
                 weight='min(2, review_weight * (1 + impact_bonus))',
                 selection=f'Return all active results when count <= {sample_size}; otherwise weighted random sampling of {sample_size} distinct results',
-                task_selection='Automatic dispatch: research synthesis refill (5% to 7%), complete-proof Lean chains, review refill (2N to 3N), Lean coverage refill (35% to 55%), then exploration. Within each class use foundational dependencies, review coverage and fair exposure.',
+                task_selection='Automatic dispatch uses weighted rotation, with urgent complete-proof Lean chains first. Shared roadmaps update for every twenty new Insights. Review targets balance the lowest effective counts plus live reservations without a global volume cap; scores and popularity do not affect Review priority. Lean coverage refills from 35% to 55%.',
                 contribution_citation_cap=None)
 
 def weight(scores,obj):
