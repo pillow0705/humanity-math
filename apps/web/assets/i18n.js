@@ -4,6 +4,7 @@ let lang='zh';try{lang=localStorage.getItem('proof-atlas.locale')||'zh';}catch{}
 const words={
 '研究依赖图':'Research dependency graphs','依赖图类型':'Dependency graph type',
 '每新增 20 条 Insight，更新同一份路线图':'Update the shared roadmap for every 20 new Insights',
+'研究至少 5 分钟，细致维护公共路线图':'Research for at least 5 minutes and carefully refine the shared roadmap',
 '证明租约 20 分钟，可根据报错反复修改':'20-minute proof lease; revise and retry using verifier feedback',
 '领取后研究至少 3 分钟，提炼更深入的结论':'Research for at least 3 minutes after claiming; develop deeper results',
 '证明路线图':'Proof roadmap','正在读取路线图…':'Loading roadmap…',
