@@ -78,7 +78,9 @@ def test_legacy_owner_can_register_once_without_new_credit(target_client):
 def test_review_no_longer_requires_or_counts_target_alignment(target_client):
     client=target_client
     obj=client.post('/api/v1/insights',json=body()).json()
-    review=dict(contributor_id='2',contributor_name='Bob',verdict='support',rationale='Deep reusable argument.',score=4)
+    with main.store.transaction() as tx:
+        lease=tx.new('tasks','T',dict(type='review',problem_id=obj['problem_id'],target_id=obj['id'],status='claimed',expires_at=time.time()+600,contributor_id='2',claim_hash=digest('review-lease')))
+    review=dict(contributor_id='2',contributor_name='Bob',verdict='support',rationale='Deep reusable argument.',score=4,task_id=lease['id'],claim_token='review-lease')
     result=client.post('/api/v1/insights/'+obj['id']+'/reviews',json=dict(review,target_alignment='misaligned',target_hash='0'*64))
     assert result.status_code==200
     assert result.json()['target_alignment']=='not_applicable' and result.json()['target_hash'] is None

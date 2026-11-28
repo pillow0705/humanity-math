@@ -81,6 +81,7 @@ def create_content(tx, kind, body):
     if kind!='insights': raise HTTPException(422,'Unsupported content type')
     need(tx,'problems',body['problem_id'])
     check_supersedes(tx,kind,body,body['problem_id'])
+    if body.get('supersedes_id'):raise HTTPException(422,'Insight replacement is disabled. Submit a standalone correction citing the original Insight; existing historical revision links are preserved.')
     check_research_time(tx,body)
     previous=need(tx,'insights',body['supersedes_id']) if body.get('supersedes_id') else None
     if previous and bool(previous.get('is_prerequisite'))!=bool(body.get('is_prerequisite')):

@@ -1,6 +1,7 @@
 import concurrent.futures, io, json, time, zipfile
 import pytest
 from fastapi.testclient import TestClient
+from review_fixtures import ReviewLeaseFixture,legacy_revision
 from apps.api import main
 from apps.api.infrastructure.store import Store, atomic
 from apps.api.modules.core import task
@@ -12,7 +13,7 @@ def client(tmp_path,monkeypatch):
     with store.transaction() as tx:
         tx.put('problems',dict(id='P001',title='Test',statement='True',lean_target=None,status='open',created_at=time.time()))
         task(tx,'P001','insight_explore')
-    class FixtureClient(TestClient):
+    class FixtureClient(ReviewLeaseFixture,TestClient):
         def post(self,*args,**kwargs):
             response=super().post(*args,**kwargs)
             # These API-only tests use the proposition True. Kernel elaboration is
@@ -68,7 +69,7 @@ def test_atomic_rollback_bad_lease(client):
 def test_references_replacement_and_review(client):
     i=client.post('/api/v1/insights',json=insight()).json()
     assert client.post('/api/v1/insights',json=dict(insight(),references=['missing'])).status_code==422
-    new=client.post('/api/v1/insights',json=dict(insight(),proof='Different proof',supersedes_id=i['id'])).json()
+    new=legacy_revision(client,dict(insight(),proof='Different proof',supersedes_id=i['id'])).json()
     assert client.get('/api/v1/insights/'+i['id']).json()['replaced_by']==[new['id']]
     r=client.post('/api/v1/insights/'+i['id']+'/reviews',json=dict(contributor_id='4',contributor_name='Beta',verdict='support',rationale='Checked claim',target_alignment='aligned',score=4))
     assert r.status_code==200
@@ -187,7 +188,7 @@ def test_scoring_citations_lean_and_final_use(client):
     for rating in [5,1]:
         response=client.post('/api/v1/insights/'+i['id']+'/reviews',json=dict(contributor_id='4',contributor_name='Beta',verdict='concern',target_alignment='aligned',score=rating,rationale='Review'))
         assert response.status_code==200
-    assert ev()['effective_reviews']==1 and ev()['contribution_points']==6
+    assert ev()['effective_reviews']==1 and ev()['contribution_points']==9.75
     assert client.get('/api/v1/contributors/4/score').json()['score']==6
     client.post('/api/v1/insights/'+i['id']+'/reviews',json=dict(contributor_id='2',contributor_name='Aster',verdict='support',target_alignment='aligned',score=5,rationale='Self'))
     assert ev()['effective_reviews']==1
@@ -197,9 +198,9 @@ def test_scoring_citations_lean_and_final_use(client):
         v=tx.get('verifications',a['verification_id']);v['status']='passed';put_test_verification(tx,v)
         tx.new('solutions','S',dict(problem_id='P001',status='verified',used_insight_ids=[i['id']],contributor_id='4'))
     assert ev()['lean_bonus']==10 and ev()['final_proof_bonus']==3
-    assert ev()['contribution_points']==19
+    assert ev()['contribution_points']==22.75
     assert client.get('/api/v1/contributors/4/score').json()['score']==14
-    assert client.get('/api/v1/contributors/2/score').json()['score']==19
+    assert client.get('/api/v1/contributors/2/score').json()['score']==22.75
     assert client.get('/api/v1/leaderboard').json()['items'][0]['id']=='2'
 
 
@@ -224,7 +225,7 @@ def test_fair_recommendations_and_low_scores(client,monkeypatch):
     targets=[client.post('/api/v1/insights',json=dict(insight(),title=str(n))).json() for n in range(300)]
     low=targets[0]
     for person,name in [('2','Aster'),('3','Bob'),('4','Beta')]:
-        client.post('/api/v1/insights/'+low['id']+'/reviews',json=dict(contributor_id=person,contributor_name=name,verdict='concern',rationale='Low rating',target_alignment='aligned',score=1))
+        client.post('/api/v1/insights/'+low['id']+'/reviews',json=dict(contributor_id=person,contributor_name=name,verdict='concern',rationale='Low rating',target_alignment='aligned',score=1 if person=='2' else 3))
     result=client.get('/api/v1/problems/P001/recommendations').json()
     assert len(result['items'])==300 and {x['id'] for x in result['items']}=={x['id'] for x in targets}
     for n in range(300,400): targets.append(client.post('/api/v1/insights',json=dict(insight(),title=str(n))).json())
@@ -308,12 +309,12 @@ def test_quality_and_citations_increase_exposure_and_task_priority(client):
     with main.store.transaction() as tx:
         for t in tx.all('tasks'): t.update(status='closed');tx.put('tasks',t)
     targets={name:client.post('/api/v1/insights',json=dict(insight(),title=name)).json() for name in ['high','cited','neutral','low']}
-    for name,rating in [('high',5),('low',1)]:
+    for name,rating in [('high',5),('low',3)]:
         for number,person in [('2','Aster'),('3','Bob'),('4','Beta')]:
-            r=client.post('/api/v1/insights/'+targets[name]['id']+'/reviews',json=dict(contributor_id=number,contributor_name=person,verdict='support' if rating==5 else 'concern',rationale='Evidence',target_alignment='aligned',score=rating))
+            r=client.post('/api/v1/insights/'+targets[name]['id']+'/reviews',json=dict(contributor_id=number,contributor_name=person,verdict='support' if rating==5 else 'concern',rationale='Evidence',target_alignment='aligned',score=1 if name=='low' and number=='2' else rating))
             assert r.status_code==200
     for n in range(3):
-        r=client.post('/api/v1/insights',json=dict(insight(),title='Citation '+str(n),references=[targets['cited']['id']]))
+        r=client.post('/api/v1/insights',json=dict(insight(),contributor_id='2',contributor_name='Aster',title='Citation '+str(n),references=[targets['cited']['id']]))
         assert r.status_code==200
     response=client.get('/api/v1/problems/P001/recommendations?limit=100').json()
     assert response['algorithm']=='weighted-sample-v3'
@@ -387,8 +388,8 @@ def test_manage_own_submissions_and_withdraw_restore(client):
     assert client.post(url+'/restore',json=owner).status_code==200
     assert client.get('/api/v1/contributors/1/score').json()['score']==10
     assert client.get('/api/v1/problems/P001/recommendations').json()['items'][0]['id']==i['id']
-    assert client.post('/api/v1/insights',json=dict(insight(),contributor_id='2',contributor_name='Aster',supersedes_id=i['id'],title='Wrong owner')).status_code==403
-    replacement=client.post('/api/v1/insights',json=dict(insight(),supersedes_id=i['id'],title='Corrected insight')).json()
+    assert client.post('/api/v1/insights',json=dict(insight(),contributor_id='2',contributor_name='Aster',supersedes_id=i['id'],title='Wrong owner')).status_code==422
+    replacement=legacy_revision(client,dict(insight(),supersedes_id=i['id'],title='Corrected insight')).json()
     assert replacement['supersedes_id']==i['id']
     assert client.get('/api/v1/contributors/1/submissions?status=superseded').json()['total']==1
     claimed=client.post('/api/v1/tasks/claim',json=dict(contributor_id='2',contributor_name='Aster',type='review')).json()
@@ -692,8 +693,7 @@ def test_prerequisite_registration_validates_lease_and_cannot_promote_itself(cli
     assert client.post('/api/v1/insights',json=body,headers={'Idempotency-Key':'support'}).json()==lemma
     assert client.post('/api/v1/insights',json=dict(insight(),title='Promotion',supersedes_id=lemma['id'])).status_code==422
     revised=client.post('/api/v1/insights',json=dict(insight(),is_prerequisite=True,title='Corrected lemma',supersedes_id=lemma['id']))
-    assert revised.status_code==200,revised.text
-    assert revised.json()['contribution_group_ids']==lemma['contribution_group_ids']
+    assert revised.status_code==422,revised.text
     assert client.get('/api/v1/contributors/1/score').json()['score']==0
 
 
@@ -703,7 +703,7 @@ def test_correcting_main_preserves_group_and_no_internal_citation_reward(client)
     lease=dict(task_id=claim['task']['id'],claim_token=claim['claim_token'])
     p=client.post('/api/v1/insights',json=dict(insight(),title='Lemma',is_prerequisite=True,**lease)).json()
     result=client.post('/api/v1/insights',json=dict(insight(),title='Main',references=[p['id']],**lease)).json()
-    corrected=client.post('/api/v1/insights',json=dict(insight(),title='Main correction',references=[p['id']],supersedes_id=result['id']))
+    corrected=legacy_revision(client,dict(insight(),title='Main correction',references=[p['id']],supersedes_id=result['id']))
     assert corrected.status_code==200,corrected.text
     assert corrected.json()['contribution_group_ids']==p['contribution_group_ids']
     assert client.get('/api/v1/contributors/1/score').json()['score']==10
@@ -1209,7 +1209,7 @@ def test_insight_ranking_scores_search_and_pagination(client):
     data=client.get('/api/v1/insights/ranking?problem_id=P001&limit=2').json()
     assert data['total']==3
     assert [x['id'] for x in data['items']]==[second['id'],first['id']]
-    assert [x['evaluation']['contribution_points'] for x in data['items']]==[30,11]
+    assert [x['evaluation']['contribution_points'] for x in data['items']]==[15,10]
     last=client.get('/api/v1/insights/ranking?problem_id=P001&offset=2').json()['items'][0]
     assert last['id']==third['id'] and last['rank']==3
     search=client.get('/api/v1/insights/ranking',params=dict(problem_id='P001',q='Citing')).json()
@@ -1221,7 +1221,7 @@ def test_insight_ranking_scores_search_and_pagination(client):
 
 def test_insight_ranking_excludes_replaced_withdrawn_and_includes_lean_bonus(client):
     old=client.post('/api/v1/insights',json=insight()).json()
-    replacement=client.post('/api/v1/insights',json=dict(insight(),title='Updated result',supersedes_id=old['id'])).json()
+    replacement=legacy_revision(client,dict(insight(),title='Updated result',supersedes_id=old['id'])).json()
     hidden=client.post('/api/v1/insights',json=dict(insight(),title='Withdrawn result')).json()
     assert client.post('/api/v1/contributors/1/submissions/insights/'+hidden['id']+'/withdraw',json=dict(contributor_id='1',contributor_name='Alice')).status_code==200
     with main.store.transaction() as tx:

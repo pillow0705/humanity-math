@@ -25,6 +25,7 @@ class LeanTarget(Strict):
     insight_dependencies: list[str] = Field(default_factory=list,max_length=100,description='Insight IDs whose valid fixed target definitions are imported; these imports do not supply proofs')
 
 class Insight(Submission):
+    supersedes_id: None = Field(default=None,description="Insight replacement is disabled; submit a standalone correction citing the original. Historical revision links remain readable.")
     lean_target: LeanTarget | None = None
 
     is_prerequisite: bool = Field(default=False,strict=True,description='True only for a supporting lemma registered for the current exploration task: no separate insight base points; it does not complete the task')
@@ -50,7 +51,7 @@ class Review(Submission):
     target_hash: str | None = Field(default=None,pattern=r'^[0-9a-f]{64}$',description='Deprecated compatibility field, ignored by mathematical Reviews')
     verdict: Literal['support','concern','refute','needs_work']
     rationale: str = Field(min_length=1, max_length=30000)
-    score: int = Field(ge=0, le=5, strict=True, description='0 only for non-mathematical or wholly unrelated content: an independent zero review immediately trashes the insight. Otherwise 1–5; not a proof certificate')
+    score: int = Field(ge=0, le=5, strict=True, description='0 only for non-mathematical or wholly unrelated content: two distinct non-self scores <=2 trash the insight. Otherwise 1–5; not a proof certificate')
 class ReviewItem(Strict):
     target_alignment: TargetAlignment = 'not_applicable'
     target_hash: str | None = Field(default=None,pattern=r'^[0-9a-f]{64}$')

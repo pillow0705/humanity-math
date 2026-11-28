@@ -14,7 +14,7 @@ def change(tx,person,kind,ident,body,withdraw):
     from apps.api.modules.management import KINDS
     if kind not in KINDS: raise HTTPException(422,'Unknown submission kind')
     obj=need(tx,kind,ident)
-    if not withdraw and kind=='insights' and tx.get('trash',ident):raise HTTPException(409,'This insight was removed by a zero review. Submit a corrected new insight or request operator review; ordinary restore cannot bypass the trash decision.')
+    if not withdraw and kind=='insights' and tx.get('trash',ident):raise HTTPException(409,'This insight was removed by independent low reviews. Submit a corrected new insight or request operator review; ordinary restore cannot bypass the trash decision.')
     if not withdraw and need(tx,'problems',obj['problem_id'])['status']=='archived': raise HTTPException(409,'Cannot restore work on an archived problem')
     if body['contributor_id']!=person or obj['contributor_id']!=person: raise HTTPException(403,'Only the matching contributor can manage this submission')
     if not withdraw and kind=='solutions' and obj.get('automatic') and withdrawn(tx,'insights',obj['insight_id']):

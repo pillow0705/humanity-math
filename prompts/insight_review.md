@@ -24,7 +24,7 @@ For an insight with claims_problem_solved=1 or -1, check the entire original pro
 Evaluate the mathematical Insight's depth, significance, originality, reusability and quality of its argument. Lean proposition correspondence belongs to the independent lean_target alignment task; Lean proof code belongs to lean_work. Do not submit formal alignment flags or inspect Lean code as part of this Review. A typing or formalization error is not a reason to trash an otherwise mathematical Insight.
 
 ## 3. Remove non-mathematical or wholly unrelated records first
-Use score=0 only when an Insight is not a mathematical result (for example a compiler probe or engineering log), or is entirely unrelated to the problem. Give a short specific rationale. A valid non-self zero review immediately withdraws it to trash: it leaves the research pool and earns no contribution or citation rewards. A flawed but relevant mathematical argument receives a low positive score, not automatic trash.
+Use score=0 only when an Insight is not a mathematical result (for example a compiler probe or engineering log), or is entirely unrelated to the problem. Give a short specific rationale. Use 1 or 2 for serious mathematical errors, including invalid deductions, circular reasoning, false statements or essential unjustified steps. A score of 0, 1 or 2 is a low rating. Two distinct non-author reviewers with latest scores <=2 automatically withdraw the Insight to trash, removing contribution and citation rewards. One low rating remains visible as a warning.
 
 ## 4. Comparative scoring
 First assess each assigned insight independently, then rank the entire batch using these criteria in order:
@@ -33,16 +33,16 @@ First assess each assigned insight independently, then rank the entire batch usi
 3. Reusability: a precise conclusion that supports further deductions.
 4. Depth of argument and supporting evidence.
 
-After assigning zeros, let n be the number of remaining mathematical Insights. Exclude zero-rated records from the allocation. For exactly 10 remaining insights, assign three scores of 5, four scores of 4 and three scores of 3: positions 1–3 receive 5, positions 4–7 receive 4, and positions 8–10 receive 3. These scores express relative position within this batch. Report mathematical errors and proof gaps explicitly in verdict and rationale at every score tier.
+First assign scores 0–2 where warranted; serious mathematical errors must receive <=2 regardless of comparative rank. Let n be the remaining sound mathematical Insights. Exclude all low-rated records from the 5/4/3 allocation. For exactly 10 remaining insights, assign three scores of 5, four scores of 4 and three scores of 3: positions 1–3 receive 5, positions 4–7 receive 4, and positions 8–10 receive 3. These scores express relative position within this batch. Report mathematical errors and proof gaps explicitly in verdict and rationale at every score tier.
 
-For n<10, allocate scores 5/4/3 in proportions 30%/40%/30%. Take the floor of 0.3n, 0.4n and 0.3n, then allocate remaining places by descending fractional remainder, breaking ties in score order 4, 5, 3. Thus n=1 gives [4], n=2 gives [5,4], and n=3 gives [5,4,3]. For an independent review outside a batch, use the full 1–5 scale: 1 fundamental defects, 2 substantial weaknesses, 3 useful but mixed, 4 strong support, 5 exceptional rigorous work.
+For n<10, allocate scores 5/4/3 in proportions 30%/40%/30%. Take the floor of 0.3n, 0.4n and 0.3n, then allocate remaining places by descending fractional remainder, breaking ties in score order 4, 5, 3. Thus n=1 gives [4], n=2 gives [5,4], and n=3 gives [5,4,3]. All new Reviews require an active task lease and complete batch submission. Do not submit independent, unleased Reviews.
 
 ## 4. Review report
 For each assigned insight supply:
 - insight_id: the exact assigned ID.
 - verdict: support, concern, refute or needs_work, according to the mathematical evidence.
 - rationale: the decisive mathematical evidence, exact problematic steps or valid deductions, usefulness and reusability, and the reason for its comparative position. Use insight IDs when comparing results.
-- score: a JSON integer from 0 to 5. Use zero only for the removal cases above. Positive ratings affect Insight base credit through C(s)=5+25*((s-1)/4)^3, where s is the mean valid non-self rating; no review gives 10 points. Citations and first exact-target Lean bonuses are added separately.
+- score: a JSON integer from 0 to 5. Use zero only for the removal cases above. Let n be the number of distinct non-author reviewers and s their mean latest rating (0–5). Insight base credit is C=10+n/(n+3)*(F(s)-10), where F(s)=5+25*((max(1,s)-1)/4)^3; no reviews gives 10 points. A single five-star review gives 15 points, two give 18; more independent reviews increase confidence. Same-author citations earn no citation points but retain dependency links. Citations and first exact-target Lean bonuses are added separately.
 
 Use the supplied schema and these fields. Ground judgments in mathematical evidence and describe the checks actually performed.
 

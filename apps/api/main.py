@@ -45,7 +45,7 @@ def submit(request, body, operation):
     with store.transaction() as tx:
         validate_identity(tx,body)
         from apps.api.modules.migration import mainline
-        if not request.url.path.endswith('/lean-targets/batch') and not request.url.path.endswith('/lean-target/recheck') and '/message-board' not in request.url.path and not (request.url.path.endswith('/reviews') and body.get('score')==0):mainline(tx)
+        if not request.url.path.endswith('/lean-targets/batch') and not request.url.path.endswith('/lean-target/recheck') and '/message-board' not in request.url.path:mainline(tx)
         old=tx.get('idempotency',key_id) if key_id else None
         if old:
             if old['fingerprint']!=fingerprint: raise HTTPException(409,'Idempotency key reused for different input')
@@ -518,12 +518,15 @@ def post_review(kind,id,body,request):
     def op(tx):
         obj=need(tx,kind,id); check_supersedes(tx,'reviews',b,obj['problem_id'])
         if withdrawn(tx,kind,id):raise HTTPException(409,'This insight is withdrawn; review an active mathematical submission')
+        if not b.get('task_id') or not b.get('claim_token'):raise HTTPException(422,'Claim a Review task and submit its complete batch to /api/v1/reviews/batch')
+        if obj['contributor_id']==b['contributor_id']:raise HTTPException(422,"Review another author's Insight")
+        b['batch_size']=1  # Only existing single-target leases use this compatibility endpoint.
         validate_review_alignment(tx,id,b)
         r=tx.new('reviews','E',dict(clean(b),target_id=id,target_kind=kind,problem_id=obj['problem_id']))
         finish_task(tx,b,'review',id,obj['problem_id'],r['id'])
         contribute(tx,r,'review')
-        from apps.api.modules.trash import zero_review
-        zero_review(tx,r)
+        from apps.api.modules.trash import apply_low_reviews
+        apply_low_reviews(tx,r)
         return r
     return submit(request,b,op)
 
