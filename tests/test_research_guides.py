@@ -135,3 +135,71 @@ def test_old_routes_are_archived_and_only_three_shared_files_are_created(tmp_pat
     assert metadata['legacy'] and 'paths' not in metadata and 'summary' not in metadata
     assert json.loads((data/'contributions/Cold.json').read_text())['object_kind']=='research_updates'
     assert (backup/'removed_routes/research_plans/Dold.json').exists()
+
+
+def test_conditional_status_rejected_and_legacy_guide_preserved_as_gap(client):
+    task=claim(client);h=header();h['graphs'][0]['nodes'][0]['status']='conditional'
+    assert client.post('/api/v1/problems/P1/research-guidance',json=body(task,header=h)).status_code==422
+    with main.store.transaction() as tx:
+        guide=tx.get('research_guides','P1');guide.update(header=h,body_markdown='Historical argument',content_hash='old-hash')
+        tx.put('research_guides',guide)
+    current=client.get('/api/v1/problems/P1/research-guidance').json()['current']
+    node=current['header']['graphs'][0]['nodes'][0]
+    assert node==dict(h['graphs'][0]['nodes'][0],status='missing')
+    assert current['body_markdown']=='Historical argument'
+    assert current['content_hash']==digest(dict(header=current['header'],body_markdown=current['body_markdown']))
+    assert len(current['header']['graphs'][0]['missing'])==2
+    again=client.get('/api/v1/problems/P1/research-guidance').json()['current']
+    assert again==current
+    # An editor holding the old hash cannot overwrite the clarified document.
+    assert client.post('/api/v1/problems/P1/research-guidance',json=body(task)).status_code==409
+
+
+def test_implication_and_missing_premise_remain_distinct(client):
+    task=claim(client);h=header();g=h['graphs'][0]
+    g['nodes'][0]['statement']='P → Q'
+    g['nodes'][1]['statement']='P'
+    r=client.post('/api/v1/problems/P1/research-guidance',json=body(task,header=h))
+    assert r.status_code==200,r.text
+    nodes=r.json()['header']['graphs'][0]['nodes']
+    assert nodes[0]['statement']=='P → Q' and nodes[0]['status']=='supported'
+    assert nodes[1]['statement']=='P' and nodes[1]['status']=='missing'
+
+
+def test_roadmap_node_detail_mouse_and_keyboard():
+    import pathlib,subprocess
+    source=pathlib.Path('apps/web/assets/app.js').read_text()
+    fragment=source[source.index('function roadmapSvg('):source.index('function bindRoadmapTabs(')]
+    script='''
+const assert=require('node:assert/strict');
+const window={UI:{lang:'en'}},esc=s=>String(s).replaceAll('<','&lt;'),referenceButtons=ids=>ids.join(','),bindDetailActions=()=>{};
+let detail='';const showDialog=(title,html)=>{detail=html;};
+'''+fragment+'''
+const graph={id:'route',title:'Route',goal_node_id:'goal',nodes:[{id:'known',kind:'insight',statement:'P → Q',status:'supported',insight_ids:['Iknown']},{id:'gap',kind:'lemma',statement:'P',status:'missing',insight_ids:[]},{id:'goal',kind:'goal',statement:'Q',status:'target',insight_ids:[]}],steps:[{requires:['known','gap'],concludes:'goal',explanation:'Apply the implication.'}],missing:[{node_id:'gap',description:'Need P',next_step:'Prove P'}]};
+const svg=roadmapSvg(graph);assert(svg.includes('data-roadmap-node="known"'));assert(svg.includes('role="button"'));assert(!svg.includes('Conditional'));
+const button={dataset:{roadmapGraph:'route',roadmapNode:'known'}};
+bindRoadmapNodes({querySelectorAll:()=>[button]},{current:{header:{graphs:[graph]}}});
+button.onclick();assert(detail.includes('P → Q'));assert(detail.includes('Iknown'));assert(detail.includes('Apply the implication.'));
+button.dataset.roadmapNode='gap';let prevented=false;button.onkeydown({key:'Enter',preventDefault:()=>{prevented=true;}});assert(prevented);assert(detail.includes('Need P'));assert(detail.includes('Prove P'));
+window.UI.lang='zh';bindRoadmapNodes({querySelectorAll:()=>[button]},{current:{header:{graphs:[graph]}}});button.onclick();assert(detail.includes('缺口与下一步'));
+'''
+    subprocess.run(['node','-e',script],check=True,capture_output=True,text=True)
+
+
+def test_route_coverage_excludes_goal_and_highlights_best_route():
+    import pathlib,subprocess
+    source=pathlib.Path('apps/web/assets/app.js').read_text()
+    fragment=source[source.index('function roadmapCoverage('):source.index('function roadmapSvg(')]
+    script="""
+const assert=require('node:assert/strict');
+const window={UI:{lang:'en'}},esc=String;let selected=false,tabbed=false;
+const host={hidden:true,querySelector:()=>button={}},tab={dataset:{routeTab:'best'},click:()=>{tabbed=true;}},view={querySelectorAll:()=>[tab]};let button;
+const $=id=>id==='roadmap-progress'?host:view,setGraphTab=()=>{selected=true;};
+"""+fragment+"""
+const graph=(id,statuses)=>({id,title:id,goal_node_id:'goal',nodes:statuses.map((status,i)=>({id:'n'+i,kind:'lemma',status})).concat([{id:'goal',kind:'goal',status:'target'}])});
+assert.deepEqual(roadmapCoverage(graph('one',['supported','missing'])),{supported:1,missing:1,total:2,ratio:0.5});
+renderRoadmapProgress({current:{header:{graphs:[graph('other',['missing','missing']),graph('best',['supported','missing'])]}}});
+assert(!host.hidden);assert(host.innerHTML.includes('best'));assert(host.innerHTML.includes('50%'));assert(host.innerHTML.includes('1/2'));button.onclick();assert(selected&&tabbed);
+renderRoadmapProgress({current:{header:{graphs:[]}}});assert(host.hidden);
+"""
+    subprocess.run(['node','-e',script],check=True,capture_output=True,text=True)

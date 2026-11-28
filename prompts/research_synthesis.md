@@ -8,15 +8,18 @@ Each problem has ONE public document. Edit it collaboratively and return a compl
 ## Distinct proof approaches
 The document may contain multiple graphs; there is no four-route cap. Keep approaches substantially different in their central method, intermediate targets or decisive obstacles. Merge near-duplicate graphs, renamed variants and routes sharing essentially the same argument. Small variations belong as alternative steps in one graph. Keep as many genuinely useful distinct approaches as the 40,000-character total budget permits. Do not manufacture extra routes to fill a quota.
 
+## Available results and explicit gaps
+For roadmap planning, treat active platform Insights as available mathematical results; do not repeat mathematical Review or Lean verification. Preserve each Insight's exact hypotheses and conclusion. A proved implication P → Q is an available result, not an unconditional proof of Q. Represent an unresolved premise P as a missing node, and show P together with the available implication yielding Q. Do not use a conditional node status. Use supported for available results (including implications), missing for unresolved propositions, and target only for the original conjecture. Explain every deduction precisely enough for a reader to identify its premises and conclusion. Historical conditional nodes may arrive as missing nodes: inspect their references and separate available results from unresolved premises.
+
 ## Machine-readable header
 Return header:{format:"humanity-proof-graphs-v1",problem_id,graphs:[...]} and body_markdown using the supplied schema. Each graph contains:
 - id, title and approach: identify its core method.
-- nodes: {id,kind,statement,status,insight_ids}. Use kind insight/lemma/goal; use status supported/conditional/missing/target. Copy precise mathematical claims and cite relevant active Insight IDs. Registration or historical compilation is not a proof.
+- nodes: {id,kind,statement,status,insight_ids}. Use kind insight/lemma/goal; use status supported/missing/target. Copy precise mathematical claims and cite relevant active Insight IDs. Registration or historical compilation is not a proof.
 - goal_node_id: the single kind=goal,status=target node. The server binds it to the original problem statement.
 - steps: {id,requires:[node IDs],concludes:node ID,explanation}. ALL requires are needed together (AND). Different steps reaching the same conclusion represent alternatives (OR).
 - missing: {node_id,description,next_step} for EVERY status=missing node, exactly once. State what remains to be proved, its hypotheses and conclusion, and a concrete next attempt.
 
-Every node must lie on a path to the original goal. No cyclic deductions, unknown references or duplicate graphs. Distinguish established results, conditional reductions and open gaps. A roadmap itself does not certify the conjecture or close the problem.
+Every node must lie on a path to the original goal. No cyclic deductions, unknown references or duplicate graphs. Distinguish available results from open gaps. A roadmap itself does not certify the conjecture or close the problem.
 
 ## Short explanation and submission
 Below the JSON header, body_markdown explains the approaches, current priorities and main difficulties without repeating complete Insight proofs. Cite IDs and links instead. The COMPLETE rendered public file—JSON header, IDs, formatting, mathematics and Markdown combined—must not exceed 40,000 Unicode characters. Aim below the limit. The server rejects oversized documents.

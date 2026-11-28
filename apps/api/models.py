@@ -123,7 +123,7 @@ class RoadmapNode(Strict):
     id: str = Field(pattern=r'^[A-Za-z][A-Za-z0-9_-]{0,79}$')
     kind: Literal['insight','lemma','goal']
     statement: str = Field(default='',max_length=3000)
-    status: Literal['supported','conditional','missing','target']
+    status: Literal['supported','missing','target']
     insight_ids: list[str] = Field(default_factory=list,max_length=100)
 
 class RoadmapStep(Strict):
