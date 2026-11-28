@@ -19,7 +19,7 @@ def coverage(tx,insights,scores,exclude=None):
     """Distinct completed reviews plus valid live reservations, per active Insight."""
     reviewed={(ident,person) for (ident,person),r in scores.latest_reviews.items()
               if ident in insights and person!=insights[ident]['contributor_id']
-              and type(r.get('score')) is int and 1<=r['score']<=5}
+              and type(r.get('score')) is int and 0<=r['score']<=5}
     counts={ident:0 for ident in insights}
     for ident,_ in reviewed:counts[ident]+=1
     reserved={(ident,t.get('contributor_id')) for t in tx.all('tasks')
@@ -75,8 +75,8 @@ def submit_batch(tx,body):
                 task_id=t['id'],batch_size=len(targets),supersedes_id=None,target_id=obj['id'],target_kind='insights',problem_id=t['problem_id'],
                 verdict=item['verdict'],rationale=item['rationale'],score=item['score'],target_alignment=item.get('target_alignment','not_applicable'),target_hash=item['target_hash']))
         contribute(tx,r,'review');results.append(r)
-        from apps.api.modules.trash import zero_review
-        zero_review(tx,r)
+        from apps.api.modules.trash import apply_low_reviews
+        apply_low_reviews(tx,r)
     result_by_target={r['target_id']:r['id'] for r in results}
     t.update(status='submitted',result_ids=[r['id'] for r in results],submitted_at=time.time())
     tx.put('tasks',t)

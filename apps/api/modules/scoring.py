@@ -1,10 +1,10 @@
 """Read-time contribution calculation: quality, citations and formalization."""
 BASE={'insights':10,'review':6,'lean_work':8,'research_synthesis':15,'lean_target':8}
-VERSION='contribution-v8-reviewed-insights'
+VERSION='contribution-v9-independent-reviews'
 FINAL_PROOF_BONUS=3.0  # Initial configurable bonus: 30% of insight base points.
 
 def policy():
-    return dict(version=VERSION,base_points=BASE,prerequisite_base_points=0,exploration_credit='One main insight receives the ten-point base; supporting prerequisites registered with is_prerequisite=true under the same exploration lease receive no separate base. Main/prerequisite internal citations earn no citation bonus; external citations retain the usual one-point reward for the cited author.',review_adjustment='Without reviews: 10; otherwise 5 + 25 * ((mean(valid scores 1–5) - 1) / 4) ** 3; prerequisite base remains zero',review_range=[0,5],review_points_range=[5,30],zero_review='A non-self zero review immediately withdraws the irrelevant insight to trash; no contribution or citation rewards while withdrawn',review_prior_count=0,citation_points=1,citation_cap=None,citation_rule='Each distinct active insight referencing another insight outside its contribution group adds one point; repeated references in one result count once. Replaced results do not multiply citations.',lean_verified_insight_bonus=10,lean_bonus_rule='Once per insight with a proof verified against its immutable, valid Lean target; unbound historical compilations and unrelated probes do not qualify.',final_proof_insight_bonus=FINAL_PROOF_BONUS,final_proof_rule='Once per insight actually used in a verified final Lean proof, based on proof-term dependencies, not mere imports.',review_batch_size=10,review_batch_points='Six base points per batch, divided equally among its assigned reviews; self/duplicate/replaced reviews do not add points',lean_points='Code: eight points once per insight, awarded only to its first exact-target verified proof; concurrent or historical duplicate proofs earn zero. Audit report: eight points on submission. No waiting is required.',review_rules='Exclude self-reviews from ratings; latest review per registered contributor and target. One review/audit contribution per contributor and target.',replacement_rules='A replacement by the same contributor replaces the prior contribution; old content remains readable.',solution_points='No separate bonus for the final submission itself',identity='Claimed public English name plus sequential number')
+    return dict(version=VERSION,base_points=BASE,prerequisite_base_points=0,exploration_credit='One main insight receives the ten-point base; supporting prerequisites registered with is_prerequisite=true under the same exploration lease receive no separate base. Main/prerequisite internal citations earn no citation bonus; external citations retain the usual one-point reward for the cited author.',review_adjustment='C=10+n/(n+3)*(F(s)-10), F(s)=5+25*((max(1,s)-1)/4)^3; s is the mean latest independent rating (0–5); n is its count. No reviews: 10; prerequisite base remains zero',review_range=[0,5],low_review_threshold=2,low_review_count_required=2,review_points_range=[5,30],zero_review='Two distinct non-self reviewers with latest scores <=2 withdraw the Insight to trash; one low rating is a warning. No credit while withdrawn',review_prior_count=3,citation_points=1,citation_cap=None,citation_rule='Each distinct active insight by another author referencing an insight outside its contribution group adds one point; same-author citations preserve dependencies but earn zero; repeated references in one result count once. Replaced results do not multiply citations.',lean_verified_insight_bonus=10,lean_bonus_rule='Once per insight with a proof verified against its immutable, valid Lean target; unbound historical compilations and unrelated probes do not qualify.',final_proof_insight_bonus=FINAL_PROOF_BONUS,final_proof_rule='Once per insight actually used in a verified final Lean proof, based on proof-term dependencies, not mere imports.',review_batch_size=10,review_batch_points='Six base points per batch, divided equally among its assigned reviews; self/duplicate/replaced reviews do not add points',lean_points='Code: eight points once per insight, awarded only to its first exact-target verified proof; concurrent or historical duplicate proofs earn zero. Audit report: eight points on submission. No waiting is required.',review_rules='Exclude self-reviews from ratings; latest review per registered contributor and target. One review/audit contribution per contributor and target.',replacement_rules='New Insight replacements are rejected. Historical revisions retain their existing score ownership and remain readable; submit standalone corrections citing the original.',solution_points='No separate bonus for the final submission itself',identity='Claimed public English name plus sequential number')
 
 class Scores:
     def __init__(self,tx):
@@ -30,7 +30,7 @@ class Scores:
                 if obj['id'] in self.superseded or obj['id'] in self.withdrawn: continue
                 for ref in set(obj.get('references',[])):
                     target=self.objects['insights'].get(ref)
-                    if target and ref!=obj['id']:
+                    if target and ref!=obj['id'] and target['contributor_id']!=obj['contributor_id']:
                         if set(obj.get('contribution_group_ids',[])) & set(target.get('contribution_group_ids',[])): continue
                         self.citations.setdefault(ref,set()).add(obj['id'])
         self.verified_insights={a['insight_id'] for a in self.objects['lean_artifacts'].values() if a['id'] in self.bound_proofs}
@@ -47,14 +47,16 @@ class Scores:
         self.memo={}
     def evaluation(self,obj,kind):
         if obj['id'] in self.memo: return self.memo[obj['id']]
-        valid=[x for (target,person),x in self.latest_reviews.items() if target==obj['id'] and person!=obj['contributor_id'] and type(x.get('score')) is int and 1<=x['score']<=5]
+        valid=[x for (target,person),x in self.latest_reviews.items() if target==obj['id'] and person!=obj['contributor_id'] and type(x.get('score')) is int and 0<=x['score']<=5]
         n=len(valid);b=0 if obj.get('is_prerequisite') else BASE[kind]
-        adjusted=0 if not b else (5+25*((sum(x['score'] for x in valid)/n-1)/4)**3 if n else b)
+        raw=5+25*((max(1,sum(x['score'] for x in valid)/n)-1)/4)**3 if n else b
+        confidence=n/(n+3)
+        adjusted=0 if not b else b+confidence*(raw-b)
         multiplier=adjusted/b if b else 1
         citation_points=len(self.citations.get(obj['id'],set())) if kind=='insights' else 0
         lean_bonus=10 if kind=='insights' and obj['id'] in self.verified_insights else 0
         final_bonus=FINAL_PROOF_BONUS if kind=='insights' and obj['id'] in self.final_used else 0
-        result=dict(base_points=b,effective_reviews=n,average_review_score=round(sum(x['score'] for x in valid)/n,3) if n else None,multiplier=round(multiplier,6),review_adjusted_points=round(adjusted,6),citation_points=citation_points,lean_bonus=lean_bonus,final_proof_bonus=final_bonus,contribution_points=round(adjusted+citation_points+lean_bonus+final_bonus,6),algorithm=VERSION)
+        result=dict(base_points=b,effective_reviews=n,average_review_score=round(sum(x['score'] for x in valid)/n,3) if n else None,multiplier=round(multiplier,6),review_adjusted_points=round(adjusted,6),review_confidence=round(confidence,6),low_review_count=sum(x['score']<=2 for x in valid),citation_points=citation_points,lean_bonus=lean_bonus,final_proof_bonus=final_bonus,contribution_points=round(adjusted+citation_points+lean_bonus+final_bonus,6),algorithm=VERSION)
         if obj['id'] in self.withdrawn: result.update(contribution_points=0,withdrawn=True)
         self.memo[obj['id']]=result;return result
     def event(self,e):

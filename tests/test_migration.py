@@ -93,13 +93,12 @@ def test_same_batch_target_definitions_are_registered_topologically(client):
         assert child['insight_dependency_snapshot'][0]['target_hash']==root['target_hash']
 
 
-def test_migration_allows_only_zero_moderation_not_normal_reviews(client):
+def test_migration_blocks_unleased_reviews_including_zero(client):
     payload=dict(contributor_id='1',contributor_name='Alice',verdict='refute',rationale='This record is engineering output, not mathematics.')
     assert client.post('/api/v1/insights/I0/reviews',json=dict(payload,score=1)).status_code==423
     r=client.post('/api/v1/insights/I0/reviews',json=dict(payload,score=0))
-    assert r.status_code==200,r.text
-    assert client.get('/api/v1/platform-status').json()['total']==4
-    assert client.get('/api/v1/trash').json()['items'][0]['insight_id']=='I0'
+    assert r.status_code==423,r.text
+    assert client.get('/api/v1/trash').json()['total']==0
 
 
 def test_existing_three_item_lease_survives_larger_batch_setting(client,monkeypatch):
