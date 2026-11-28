@@ -876,7 +876,7 @@ def submit_dispatch_reviews(client,c):
 def dispatch_metrics(client):
     return client.get('/api/v1/problems/P001/dispatch').json()['state']
 
-def test_dynamic_review_refill_three_distinct_reviewers_and_fallback(client):
+def test_dynamic_review_rounds_continue_and_new_insights_get_priority(client):
     for n in range(5):client.post('/api/v1/insights',json=dict(insight(),title='Work '+str(n)))
     assert dispatch_claim(client,type='research_synthesis')['task']['type']=='research_synthesis'
     first=dispatch_claim(client,type='review');assert first['task']['type']=='review' and len(first['task']['target_ids'])==5
@@ -891,14 +891,14 @@ def test_dynamic_review_refill_three_distinct_reviewers_and_fallback(client):
     submit_dispatch_reviews(client,second)
     state=dispatch_metrics(client);assert state['reviews']==10 and state['review_refill']
     third=dispatch_claim(client,'4','Beta',type='review');submit_dispatch_reviews(client,third)
-    state=dispatch_metrics(client);assert state['reviews']==15 and not state['review_refill']
+    state=dispatch_metrics(client);assert state['reviews']==15 and state['review_refill'] and state['review_level']==4
     assert client.post('/api/v1/tasks/'+lean['task']['id']+'/release',json={'claim_token':lean['claim_token']}).status_code==200
     assert dispatch_claim(client,type='lean_work')['task']['type']=='lean_work'
-    # Between the lower and upper review thresholds, completed refill stays off.
-    client.post('/api/v1/insights',json=dict(insight(),title='New work'))
-    assert not dispatch_metrics(client)['review_refill']
-    for n in range(2):client.post('/api/v1/insights',json=dict(insight(),title='Growth '+str(n)))
-    assert dispatch_metrics(client)['review_refill']
+    # A globally well-reviewed corpus must still review a newly added result.
+    new=client.post('/api/v1/insights',json=dict(insight(),title='New work')).json()
+    state=dispatch_metrics(client);assert state['review_refill'] and state['review_min']==0
+    fresh=dispatch_claim(client,type='review')
+    assert fresh['task']['target_ids']==[new['id']]
 
 
 def test_dynamic_reservations_bound_concurrent_lean_dispatch(client):
@@ -960,7 +960,7 @@ def test_review_assignment_prefers_low_coverage_and_limits_last_batch(client):
     claimed=dispatch_claim(client,'4','Beta',type='review')
     assert claimed['task']['type']=='review' and claimed['task']['target_ids']==[targets[2]['id']]
     submit_dispatch_reviews(client,claimed)
-    assert dispatch_metrics(client)['reviews']==9 and not dispatch_metrics(client)['review_refill']
+    assert dispatch_metrics(client)['reviews']==9 and dispatch_metrics(client)['review_level']==4
     assert client.get('/api/v1/problems/P001/overview').json()['stats']['reviews']==9
 
 
@@ -970,7 +970,7 @@ def test_review_prefers_fewer_scores_and_avoids_prior_reviewer(client):
         client.post('/api/v1/insights/'+targets[index]['id']+'/reviews',json=dict(contributor_id=person,contributor_name=name,target_alignment='aligned',score=4,verdict='support',rationale='Reviewed'))
     assert dispatch_claim(client,type='research_synthesis')['task']['type']=='research_synthesis'
     claimed=dispatch_claim(client,type='review')
-    assert claimed['task']['target_ids']==[targets[2]['id'],targets[1]['id']]
+    assert claimed['task']['target_ids']==[targets[2]['id']]
 
 @pytest.mark.parametrize('n,passed,previous,expected,target',[(20,6,False,True,11),(20,7,False,False,11),(20,7,True,True,11),(20,10,True,True,11),(20,11,True,False,11),(3,1,False,True,2),(0,0,True,False,0)])
 def test_lean_35_55_threshold_boundaries(n,passed,previous,expected,target):
@@ -1273,3 +1273,31 @@ def test_configured_lean_memory_is_exposed():
     code="import json;from apps.api.modules.lean import environment;print(json.dumps(environment()))"
     result=json.loads(subprocess.check_output([sys.executable,'-c',code],env=env,text=True))
     assert result['limits']['container_memory_mb']==6144
+
+
+def test_review_balancing_ignores_global_total_and_quality_weights(client):
+    targets=[client.post('/api/v1/insights',json=dict(insight(),title='Balanced '+str(n))).json() for n in range(3)]
+    with main.store.transaction() as tx:
+        for j in range(6):tx.put('contributors',dict(id='R'+str(j),name='Reviewer'+str(j),created_at=1))
+        for index,count in enumerate([6,3,0]):
+            for j in range(count):
+                tx.put('reviews',dict(id=f'Ebalanced{index}_{j}',target_id=targets[index]['id'],target_kind='insights',problem_id='P001',contributor_id='R'+str(j),contributor_name='Reviewer'+str(j),score=5,verdict='support',rationale='Synthetic independent review',created_at=j+1))
+    state=dispatch_metrics(client)
+    assert state['reviews']==9 and state['review_min']==0 and state['review_room']==1
+    claim=dispatch_claim(client,type='review')
+    assert claim['task']['target_ids']==[targets[2]['id']]
+
+
+def test_review_balancing_reservations_and_expired_leases(client):
+    targets=[client.post('/api/v1/insights',json=dict(insight(),title='Reservation '+str(n))).json() for n in range(2)]
+    r=client.post('/api/v1/insights/'+targets[1]['id']+'/reviews',json=dict(contributor_id='4',contributor_name='Beta',score=4,verdict='support',rationale='Independent assessment'))
+    assert r.status_code==200,r.text
+    first=dispatch_claim(client,type='review')
+    assert first['task']['target_ids']==[targets[0]['id']]
+    second=dispatch_claim(client,'3','Bob',type='review')
+    assert second['task']['target_ids']==[targets[1]['id']]
+    assert dispatch_metrics(client)['review_reserved']==2
+    with main.store.transaction() as tx:
+        t=tx.get('tasks',first['task']['id']);t['expires_at']=0;tx.put('tasks',t)
+    fresh=dispatch_claim(client,'4','Beta',type='review')
+    assert fresh['task']['target_ids']==[targets[0]['id']]

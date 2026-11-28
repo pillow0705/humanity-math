@@ -6,7 +6,6 @@ from apps.api.infrastructure.store import digest
 from apps.api.modules.core import need, clean, contribute, supported_task
 from apps.api.modules.lifecycle import withdrawn
 from apps.api.modules.scoring import Scores
-from apps.api.modules.recommendations import ranking
 
 BATCH_SIZE = 10
 
@@ -16,16 +15,34 @@ def busy_targets(tx, exclude=None):
             and t['status']=='claimed' and t.get('expires_at',0)>time.time()
             for ident in t.get('target_ids',[]) or [t.get('target_id')]}
 
+def coverage(tx,insights,scores,exclude=None):
+    """Distinct completed reviews plus valid live reservations, per active Insight."""
+    reviewed={(ident,person) for (ident,person),r in scores.latest_reviews.items()
+              if ident in insights and person!=insights[ident]['contributor_id']
+              and type(r.get('score')) is int and 1<=r['score']<=5}
+    counts={ident:0 for ident in insights}
+    for ident,_ in reviewed:counts[ident]+=1
+    reserved={(ident,t.get('contributor_id')) for t in tx.all('tasks')
+              if t['id']!=exclude and t['type']=='review' and supported_task(t)
+              and t['status']=='claimed' and t.get('expires_at',0)>time.time()
+              for ident in t.get('target_ids',[]) or [t.get('target_id')]
+              if ident in insights and t.get('contributor_id')!=insights[ident]['contributor_id']
+              and (ident,t.get('contributor_id')) not in reviewed}
+    expected=dict(counts)
+    for ident,_ in reserved:expected[ident]+=1
+    level=min(expected.values(),default=-1)+1
+    return reviewed,counts,reserved,expected,level
+
 def prepare_batch(tx,t,person,limit=BATCH_SIZE,strict_target=False):
     busy=busy_targets(tx,exclude=t['id'])
     scores=Scores(tx)
-    eligible=[i for i in tx.all('insights') if i['problem_id']==t['problem_id']
-              and i['id'] not in busy and i['id'] not in scores.withdrawn
-              and i['id'] not in scores.superseded and i['contributor_id']!=person
-              and (i['id'],person) not in scores.latest_reviews]
-    def count(i):
-        return sum(ident==i['id'] and reviewer!=i['contributor_id'] for ident,reviewer in scores.latest_reviews)
-    eligible.sort(key=lambda i:(count(i),)+ranking(tx,scores,'task_claims',i))
+    insights={i['id']:i for i in tx.all('insights') if i['problem_id']==t['problem_id']
+              and i['id'] not in scores.withdrawn|scores.superseded}
+    _,_,_,expected,level=coverage(tx,insights,scores,exclude=t['id'])
+    eligible=[i for i in insights.values() if i['id'] not in busy
+              and i['contributor_id']!=person and (i['id'],person) not in scores.latest_reviews
+              and expected[i['id']]<level]
+    eligible.sort(key=lambda i:(expected[i['id']],i['created_at'],i['id']))
     if strict_target and t.get('target_id'):
         target=next((i for i in eligible if i['id']==t['target_id']),None)
         if not target:return False
@@ -35,7 +52,7 @@ def prepare_batch(tx,t,person,limit=BATCH_SIZE,strict_target=False):
     t['target_id']=selected[0]['id']
     t['target_ids']=[i['id'] for i in selected]
     t['batch_size']=len(selected)
-    t['goal']=f"Review all {len(selected)} assigned insights separately; submit one verdict, rationale and integer score (1–5) per insight."
+    t['goal']=f"Review all {len(selected)} assigned insights separately; submit one verdict, rationale and integer score (0–5) per insight."
     return True
 
 def submit_batch(tx,body):

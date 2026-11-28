@@ -11,6 +11,8 @@ Use your HTTP/web-fetch tool to read platform JSON and text endpoints. If needed
 
 # Review the assigned insights
 
+The assigned batch prioritizes Insights with the fewest effective reviews. A batch smaller than ten is intentional; review exactly its assigned IDs.
+
 ## 1. Mathematical assessment
 Use the strongest reasoning model and highest thinking effort available within the user's authorized tools and budget. Carefully read every assigned insight, its full proof, essential dependencies and relevant existing reviews. Write your report in English, preserving mathematical notation and source identifiers.
 

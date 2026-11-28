@@ -17,8 +17,8 @@ def available(t):
 def snapshot(tx,pid,scores=None):
     scores=scores or Scores(tx)
     insights={i['id']:i for i in scores.objects['insights'].values() if i['problem_id']==pid and i['id'] not in scores.withdrawn|scores.superseded}
-    reviewed={(ident,person) for (ident,person),r in scores.latest_reviews.items() if ident in insights and person!=insights[ident]['contributor_id'] and type(r.get('score')) is int and 1<=r['score']<=5}
-    review_counts={ident:sum(i==ident for i,_ in reviewed) for ident in insights}
+    from apps.api.modules.review_batches import coverage
+    reviewed,review_counts,review_reserved,expected_reviews,review_level=coverage(tx,insights,scores)
     passed=set();pending=set()
     for a in scores.objects['lean_artifacts'].values():
         if a['insight_id'] not in insights or a['id'] in scores.withdrawn|scores.superseded:continue
@@ -26,13 +26,9 @@ def snapshot(tx,pid,scores=None):
         if a.get('library_id')!=LIBRARY_ID:continue
         if a['insight_id'] in scores.verified_insights:passed.add(a['insight_id'])
         if v.get('status') in ('queued','running') and (a.get('target') or {}).get('target_hash')==getattr(scores,'targets',{}).get(a['insight_id'],{}).get('target_hash') and a.get('target'):pending.add(a['insight_id'])
-    review_reserved=set();lean_reserved=set()
+    lean_reserved=set()
     for t in tx.all('tasks'):
         if t['problem_id']!=pid or not live(t):continue
-        if t['type']=='review':
-            person=t.get('contributor_id')
-            for ident in t.get('target_ids',[]) or [t.get('target_id')]:
-                if ident in insights and person!=insights[ident]['contributor_id'] and (ident,person) not in reviewed:review_reserved.add((ident,person))
         if t['type']=='lean_work' and t.get('mode') in ('formalize','repair') and t.get('target_id') in insights:lean_reserved.add(t['target_id'])
     n=len(insights);r=len(reviewed);l=len(passed)
     synthesis_reserved=sum(t['problem_id']==pid and t['type']=='research_synthesis' and live(t) for t in tx.all('tasks'))
@@ -54,9 +50,11 @@ def snapshot(tx,pid,scores=None):
     synthesis_target=schedule['initial_target']+len(seen-set(schedule['baseline_ids']))//20
     synthesis_completed=len(accepted)
     synthesis_refill=synthesis_completed<synthesis_target
-    review_refill=n>0 and (r<2*n or (old.get('review_refill',False) and r<3*n))
+    review_refill=n>0
+    review_room=sum(max(0,review_level-count) for count in expected_reviews.values())
+    review_target=sum(max(review_level,count) for count in expected_reviews.values())
     lean_refill=n>0 and (20*l<7*n or (old.get('lean_refill',False) and 20*l<11*n))
-    state=dict(synthesis_completed=synthesis_completed,synthesis_reserved=synthesis_reserved,synthesis_refill=synthesis_refill,synthesis_target=synthesis_target,synthesis_room=max(0,synthesis_target-synthesis_completed-synthesis_reserved),id=pid,insights=n,reviews=r,verified_insights=l,review_reserved=len(review_reserved),lean_reserved=len((pending|lean_reserved)-passed),review_refill=review_refill,lean_refill=lean_refill,review_target=3*n,lean_target=((11*n+19)//20),review_room=max(0,3*n-r-len(review_reserved)),lean_room=max(0,((11*n+19)//20)-len(passed|pending|lean_reserved)))
+    state=dict(synthesis_completed=synthesis_completed,synthesis_reserved=synthesis_reserved,synthesis_refill=synthesis_refill,synthesis_target=synthesis_target,synthesis_room=max(0,synthesis_target-synthesis_completed-synthesis_reserved),id=pid,insights=n,reviews=r,verified_insights=l,review_reserved=len(review_reserved),lean_reserved=len((pending|lean_reserved)-passed),review_refill=review_refill,lean_refill=lean_refill,review_level=review_level,review_min=min(review_counts.values(),default=0),review_max=max(review_counts.values(),default=0),review_target=review_target,lean_target=((11*n+19)//20),review_room=review_room,lean_room=max(0,((11*n+19)//20)-len(passed|pending|lean_reserved)))
     if state!=old:tx.put('dispatch_states',state)
     return state,insights,review_counts,passed,pending,lean_reserved
 
